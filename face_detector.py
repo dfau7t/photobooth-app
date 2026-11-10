@@ -1,60 +1,75 @@
 """
 Face detection module for Photobooth.
-Uses OpenCV's YuNet deep learning face detector to locate faces in real time
-and produce clean, padded, aspect-ratio-friendly cropped headshot images.
+Uses Google MediaPipe's FaceDetector (BlazeFace short-range model) to locate faces
+in real time and extract bounding boxes, confidence scores, and facial keypoints.
+Produces clean, padded, aspect-ratio-friendly cropped headshot images.
 """
 
 import os
+# Ensure matplotlib / font caches don't trigger permission warnings in sandbox
+os.environ["MPLCONFIGDIR"] = "/tmp"
+
+import math
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 import cv2
+import mediapipe as mp
+from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import vision
 
 
 class FaceDetector:
-    """Detects human faces and extracts cropped portrait images."""
+    """Detects human faces and extracts cropped portrait images using Google MediaPipe."""
 
     def __init__(
         self,
-        model_path: str = "models/face_detection_yunet_2023mar.onnx",
-        score_threshold: float = 0.6,
+        model_path: str = "models/blaze_face_short_range.tflite",
+        score_threshold: float = 0.5,
         nms_threshold: float = 0.3,
+        **kwargs,
     ):
-        self.model_path = os.path.abspath(model_path)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        default_model = os.path.join(base_dir, "models", "blaze_face_short_range.tflite")
+
+        candidate_path = os.path.abspath(model_path)
+        # If model_path points to an ONNX model or does not exist, use default TFLite model
+        if candidate_path.endswith(".onnx") or not os.path.exists(candidate_path):
+            candidate_path = os.path.join(base_dir, model_path)
+        if candidate_path.endswith(".onnx") or not os.path.exists(candidate_path):
+            candidate_path = default_model
+
+        self.model_path = candidate_path
         self.score_threshold = score_threshold
         self.nms_threshold = nms_threshold
-        self.detector: Optional[cv2.FaceDetectorYN] = None
-        self._current_input_size: Optional[Tuple[int, int]] = None
+        self.detector: Optional[vision.FaceDetector] = None
 
         self._load_model()
 
     def _load_model(self) -> None:
-        """Initializes the YuNet deep learning detector."""
+        """Initializes the MediaPipe FaceDetector with BlazeFace short-range model."""
         if not os.path.exists(self.model_path):
             print(f"[FaceDetector] Warning: Model file not found at {self.model_path}")
             self.detector = None
             return
 
         try:
-            # Initialize with standard 640x480 resolution (will update dynamically per frame)
-            self.detector = cv2.FaceDetectorYN_create(
-                model=self.model_path,
-                config="",
-                input_size=(640, 480),
-                score_threshold=self.score_threshold,
-                nms_threshold=self.nms_threshold,
-                top_k=10,
+            base_options = mp_tasks.BaseOptions(model_asset_path=self.model_path)
+            options = vision.FaceDetectorOptions(
+                base_options=base_options,
+                min_detection_confidence=self.score_threshold,
             )
-            self._current_input_size = (640, 480)
-            print(f"[FaceDetector] Loaded YuNet face detection model from: {self.model_path}")
+            self.detector = vision.FaceDetector.create_from_options(options)
+            print(f"[FaceDetector] Loaded MediaPipe face detection model from: {self.model_path}")
         except Exception as e:
-            print(f"[FaceDetector] Error initializing YuNet detector: {e}")
+            print(f"[FaceDetector] Error initializing MediaPipe FaceDetector: {e}")
             self.detector = None
 
     def detect_faces(
         self,
-        frame: np.ndarray,
+        frame: Optional[np.ndarray],
         fallback_box: Optional[Tuple[int, int, int, int]] = None,
         fallback_boxes: Optional[List[Tuple[int, int, int, int]]] = None,
+        fallback_landmarks: Optional[List[List[Tuple[int, int]]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Detects faces in the given frame.
@@ -64,45 +79,120 @@ class FaceDetector:
                 {
                     "box": (x, y, w, h), # int bounding box
                     "confidence": float,
-                    "landmarks": list of 5 (x, y) tuples,
+                    "landmarks": list of 5 to 7 (x, y) tuples:
+                        [right_eye, left_eye, nose_tip, mouth_right, mouth_left, right_ear, left_ear],
                 }, ...
             ]
         """
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return []
+
         faces_list = []
         h, w = frame.shape[:2]
 
         if self.detector is not None:
             try:
-                # Update input size if frame dimensions changed
-                if self._current_input_size != (w, h):
-                    self.detector.setInputSize((w, h))
-                    self._current_input_size = (w, h)
+                # Ensure 3-channel BGR format
+                if len(frame.shape) == 2:
+                    bgr_frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                elif frame.shape[2] == 4:
+                    bgr_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                else:
+                    bgr_frame = frame
 
-                ret, faces = self.detector.detect(frame)
-                if faces is not None and len(faces) > 0:
-                    for face_data in faces:
-                        # face_data format: [x, y, w, h, x_re, y_re, x_le, y_le, x_nt, y_nt, x_rc, y_rc, x_lc, y_lc, score]
-                        fx, fy, fw, fh = map(int, face_data[:4])
-                        score = float(face_data[-1])
+                rgb_frame = np.ascontiguousarray(cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB))
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+                detection_result = self.detector.detect(mp_image)
 
-                        # Clamp box to image bounds
-                        fx = max(0, fx)
-                        fy = max(0, fy)
-                        fw = min(w - fx, fw)
-                        fh = min(h - fy, fh)
+                if detection_result and detection_result.detections:
+                    for det in detection_result.detections:
+                        bb = det.bounding_box
+                        rx1 = max(0, int(bb.origin_x))
+                        ry1 = max(0, int(bb.origin_y))
+                        rx2 = min(w, int(bb.origin_x + bb.width))
+                        ry2 = min(h, int(bb.origin_y + bb.height))
+                        fx = rx1
+                        fy = ry1
+                        fw = max(0, rx2 - rx1)
+                        fh = max(0, ry2 - ry1)
 
-                        if fw > 20 and fh > 20:
-                            landmarks = []
-                            for i in range(4, 14, 2):
-                                landmarks.append((int(face_data[i]), int(face_data[i + 1])))
+                        if fw <= 20 or fh <= 20:
+                            continue
 
-                            faces_list.append({
-                                "box": (fx, fy, fw, fh),
-                                "confidence": score,
-                                "landmarks": landmarks,
-                            })
+                        score = float(det.categories[0].score) if det.categories else 1.0
+
+                        # MediaPipe BlazeFace keypoints:
+                        # 0: right eye
+                        # 1: left eye
+                        # 2: nose tip
+                        # 3: mouth center
+                        # 4: right ear tragion
+                        # 5: left ear tragion
+                        kps = det.keypoints
+                        if len(kps) >= 6:
+                            re = (
+                                max(0, min(w - 1, int(round(kps[0].x * w)))),
+                                max(0, min(h - 1, int(round(kps[0].y * h)))),
+                            )
+                            le = (
+                                max(0, min(w - 1, int(round(kps[1].x * w)))),
+                                max(0, min(h - 1, int(round(kps[1].y * h)))),
+                            )
+                            nose_pt = (
+                                max(0, min(w - 1, int(round(kps[2].x * w)))),
+                                max(0, min(h - 1, int(round(kps[2].y * h)))),
+                            )
+                            mc = (
+                                max(0, min(w - 1, int(round(kps[3].x * w)))),
+                                max(0, min(h - 1, int(round(kps[3].y * h)))),
+                            )
+                            rear = (
+                                max(0, min(w - 1, int(round(kps[4].x * w)))),
+                                max(0, min(h - 1, int(round(kps[4].y * h)))),
+                            )
+                            lear = (
+                                max(0, min(w - 1, int(round(kps[5].x * w)))),
+                                max(0, min(h - 1, int(round(kps[5].y * h)))),
+                            )
+
+                            # Derive mouth right and left corners along the eye-axis
+                            dx = le[0] - re[0]
+                            dy = le[1] - re[1]
+                            edist = math.hypot(dx, dy)
+                            if edist < 1e-4:
+                                ux, uy = 1.0, 0.0
+                                half_m = fw * 0.15
+                            else:
+                                ux, uy = dx / edist, dy / edist
+                                half_m = edist * 0.28
+
+                            mr = (
+                                max(0, min(w - 1, int(round(mc[0] - ux * half_m)))),
+                                max(0, min(h - 1, int(round(mc[1] - uy * half_m)))),
+                            )
+                            ml = (
+                                max(0, min(w - 1, int(round(mc[0] + ux * half_m)))),
+                                max(0, min(h - 1, int(round(mc[1] + uy * half_m)))),
+                            )
+
+                            landmarks = [re, le, nose_pt, mr, ml, rear, lear]
+                        else:
+                            # Fallback canonical landmarks if keypoints aren't populated
+                            landmarks = [
+                                (fx + int(0.33 * fw), fy + int(0.38 * fh)),
+                                (fx + int(0.67 * fw), fy + int(0.38 * fh)),
+                                (fx + int(0.50 * fw), fy + int(0.56 * fh)),
+                                (fx + int(0.36 * fw), fy + int(0.74 * fh)),
+                                (fx + int(0.64 * fw), fy + int(0.74 * fh)),
+                            ]
+
+                        faces_list.append({
+                            "box": (fx, fy, fw, fh),
+                            "confidence": score,
+                            "landmarks": landmarks,
+                        })
             except Exception as e:
-                print(f"[FaceDetector] Detection error: {e}")
+                print(f"[FaceDetector] MediaPipe detection error: {e}")
 
         # If no real face was detected and simulated fallback boxes were provided (e.g. demo mode)
         if len(faces_list) == 0:
@@ -112,19 +202,32 @@ class FaceDetector:
             elif fallback_box:
                 target_boxes.append(fallback_box)
 
-            for b in target_boxes:
+            for idx, b in enumerate(target_boxes):
                 bx, by, bw, bh = b
                 bx = max(0, min(w - 20, bx))
                 by = max(0, min(h - 20, by))
                 bw = min(w - bx, bw)
                 bh = min(h - by, bh)
+
+                lm = []
+                if fallback_landmarks and idx < len(fallback_landmarks):
+                    lm = fallback_landmarks[idx]
+                else:
+                    lm = [
+                        (bx + int(0.33 * bw), by + int(0.38 * bh)),
+                        (bx + int(0.67 * bw), by + int(0.38 * bh)),
+                        (bx + int(0.50 * bw), by + int(0.56 * bh)),
+                        (bx + int(0.36 * bw), by + int(0.74 * bh)),
+                        (bx + int(0.64 * bw), by + int(0.74 * bh)),
+                    ]
+
                 faces_list.append({
                     "box": (bx, by, bw, bh),
                     "confidence": 1.0,
-                    "landmarks": [],
+                    "landmarks": lm,
                 })
 
-        # Sort faces: largest face first (primary subject), or left-to-right
+        # Sort faces: largest face first (primary subject)
         faces_list.sort(key=lambda f: f["box"][2] * f["box"][3], reverse=True)
         return faces_list
 
@@ -170,10 +273,10 @@ class FaceDetector:
         y2 = int(round(cy + padded_h / 2.0))
 
         # Clamp to frame boundaries
-        crop_x1 = max(0, x1)
-        crop_y1 = max(0, y1)
-        crop_x2 = min(img_w, x2)
-        crop_y2 = min(img_h, y2)
+        crop_x1 = max(0, min(img_w - 1, x1))
+        crop_y1 = max(0, min(img_h - 1, y1))
+        crop_x2 = max(crop_x1 + 1, min(img_w, x2))
+        crop_y2 = max(crop_y1 + 1, min(img_h, y2))
 
         cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
         return cropped

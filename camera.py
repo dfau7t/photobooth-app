@@ -32,6 +32,7 @@ class Camera:
         self.is_simulated = False
         self.simulated_face_count: int = 3
         self.simulated_face_boxes: List[Tuple[int, int, int, int]] = []
+        self.simulated_face_landmarks: List[List[Tuple[int, int]]] = []
         self._sim_start_time = time.time()
 
         self._initialize_camera()
@@ -113,6 +114,7 @@ class Camera:
 
         # Draw animated avatars (supports 1, 2, or 3 subjects in booth)
         self.simulated_face_boxes = []
+        self.simulated_face_landmarks = []
 
         def draw_avatar(cx, cy, shirt_col, skin_col, scale=1.0):
             r = int(55 * scale)
@@ -133,8 +135,10 @@ class Camera:
             # Eyes
             eye_off_x = int(18 * scale)
             eye_off_y = int(8 * scale)
-            cv2.circle(frame, (cx - eye_off_x, cy - eye_off_y), int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
-            cv2.circle(frame, (cx + eye_off_x, cy - eye_off_y), int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
+            re_pt = (cx - eye_off_x, cy - eye_off_y)
+            le_pt = (cx + eye_off_x, cy - eye_off_y)
+            cv2.circle(frame, re_pt, int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
+            cv2.circle(frame, le_pt, int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
             # Smile
             cv2.ellipse(
                 frame,
@@ -153,6 +157,11 @@ class Camera:
 
             box_size = int(140 * scale)
             self.simulated_face_boxes.append((cx - box_size // 2, cy - box_size // 2, box_size, box_size))
+
+            nose_pt = (cx, cy + int(4 * scale))
+            mr_pt = (cx - int(12 * scale), cy + int(14 * scale))
+            ml_pt = (cx + int(12 * scale), cy + int(14 * scale))
+            self.simulated_face_landmarks.append([re_pt, le_pt, nose_pt, mr_pt, ml_pt])
 
         sway = int(20 * math.sin(elapsed * 1.5))
         bob = int(10 * math.cos(elapsed * 1.8))
@@ -216,6 +225,10 @@ class Camera:
     def get_simulated_face_boxes(self) -> List[Tuple[int, int, int, int]]:
         """Returns the simulated face bounding boxes if running in demo mode."""
         return self.simulated_face_boxes if self.is_simulated else []
+
+    def get_simulated_face_landmarks(self) -> List[List[Tuple[int, int]]]:
+        """Returns the simulated face landmarks if running in demo mode."""
+        return self.simulated_face_landmarks if self.is_simulated else []
 
     def get_simulated_face_box(self) -> Optional[Tuple[int, int, int, int]]:
         """Returns the primary simulated face bounding box."""
