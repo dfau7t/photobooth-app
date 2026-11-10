@@ -54,6 +54,7 @@ class FaceDetector:
         self,
         frame: np.ndarray,
         fallback_box: Optional[Tuple[int, int, int, int]] = None,
+        fallback_boxes: Optional[List[Tuple[int, int, int, int]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Detects faces in the given frame.
@@ -103,19 +104,25 @@ class FaceDetector:
             except Exception as e:
                 print(f"[FaceDetector] Detection error: {e}")
 
-        # If no real face was detected and a simulated fallback box was provided (e.g. demo mode)
-        if len(faces_list) == 0 and fallback_box is not None:
-            bx, by, bw, bh = fallback_box
-            # Ensure within frame bounds
-            bx = max(0, min(w - 20, bx))
-            by = max(0, min(h - 20, by))
-            bw = min(w - bx, bw)
-            bh = min(h - by, bh)
-            faces_list.append({
-                "box": (bx, by, bw, bh),
-                "confidence": 1.0,
-                "landmarks": [],
-            })
+        # If no real face was detected and simulated fallback boxes were provided (e.g. demo mode)
+        if len(faces_list) == 0:
+            target_boxes = []
+            if fallback_boxes:
+                target_boxes.extend(fallback_boxes)
+            elif fallback_box:
+                target_boxes.append(fallback_box)
+
+            for b in target_boxes:
+                bx, by, bw, bh = b
+                bx = max(0, min(w - 20, bx))
+                by = max(0, min(h - 20, by))
+                bw = min(w - bx, bw)
+                bh = min(h - by, bh)
+                faces_list.append({
+                    "box": (bx, by, bw, bh),
+                    "confidence": 1.0,
+                    "landmarks": [],
+                })
 
         # Sort faces: largest face first (primary subject), or left-to-right
         faces_list.sort(key=lambda f: f["box"][2] * f["box"][3], reverse=True)

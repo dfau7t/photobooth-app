@@ -23,7 +23,7 @@ TEXT_MUTED = (140, 145, 160)
 
 
 class Button:
-    """Clickable UI button with hover animations and keyboard shortcut hints."""
+    """Clickable UI button with hover animations, keyboard shortcut hints, and disabled state."""
 
     def __init__(
         self,
@@ -33,7 +33,10 @@ class Button:
         bg_color: Tuple[int, int, int] = SURFACE_DARK,
         hover_color: Tuple[int, int, int] = (45, 48, 62),
         text_color: Tuple[int, int, int] = TEXT_WHITE,
+        disabled_bg_color: Tuple[int, int, int] = (36, 38, 46),
+        disabled_text_color: Tuple[int, int, int] = (105, 110, 122),
         on_click: Optional[Callable[[], None]] = None,
+        enabled: bool = True,
     ):
         self.rect = pygame.Rect(rect)
         self.label = label
@@ -41,13 +44,18 @@ class Button:
         self.bg_color = bg_color
         self.hover_color = hover_color
         self.text_color = text_color
+        self.disabled_bg_color = disabled_bg_color
+        self.disabled_text_color = disabled_text_color
         self.on_click = on_click
+        self.enabled = enabled
         self.is_hovered = False
 
     def update(self, mouse_pos: Tuple[int, int]):
-        self.is_hovered = self.rect.collidepoint(mouse_pos)
+        self.is_hovered = self.enabled and self.rect.collidepoint(mouse_pos)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
+        if not self.enabled:
+            return False
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 if self.on_click:
@@ -56,7 +64,35 @@ class Button:
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font, hint_font: pygame.font.Font):
-        # Background
+        if not self.enabled:
+            # Greyed-out / disabled state
+            pygame.draw.rect(surface, self.disabled_bg_color, self.rect, border_radius=10)
+            pygame.draw.rect(surface, (48, 50, 60), self.rect, width=1, border_radius=10)
+
+            # Label text
+            label_surf = font.render(self.label, True, self.disabled_text_color)
+            if self.shortcut:
+                hint_surf = hint_font.render(f"[{self.shortcut}]", True, (75, 78, 88))
+                total_w = label_surf.get_width() + hint_surf.get_width() + 8
+                start_x = self.rect.centerx - total_w // 2
+
+                surface.blit(
+                    label_surf,
+                    (start_x, self.rect.centery - label_surf.get_height() // 2),
+                )
+                surface.blit(
+                    hint_surf,
+                    (
+                        start_x + label_surf.get_width() + 8,
+                        self.rect.centery - hint_surf.get_height() // 2,
+                    ),
+                )
+            else:
+                surf_rect = label_surf.get_rect(center=self.rect.center)
+                surface.blit(label_surf, surf_rect)
+            return
+
+        # Enabled state
         color = self.hover_color if self.is_hovered else self.bg_color
         pygame.draw.rect(surface, color, self.rect, border_radius=10)
 
@@ -198,49 +234,28 @@ class CountdownOverlay:
 
 
 class PreviewToast:
-    """Floating polaroid-style card displaying the last captured photo and face crop."""
+    """Floating polaroid-style card displaying the last captured full photo."""
 
     def __init__(self, display_duration: float = 4.5):
         self.display_duration = display_duration
         self.start_time: Optional[float] = None
         self.thumbnail_surface: Optional[pygame.Surface] = None
-        self.face_thumbnail_surface: Optional[pygame.Surface] = None
         self.saved_filename: str = ""
-        self.face_filename: str = ""
 
-    def show(
-        self,
-        bgr_image,
-        filename: str,
-        face_bgr_image: Optional[np.ndarray] = None,
-        face_filename: str = "",
-    ):
+    def show(self, bgr_image, filename: str):
         self.saved_filename = filename
-        self.face_filename = face_filename
         self.start_time = time.time()
 
         # Convert OpenCV BGR image to Pygame Surface thumbnail
         import cv2
         h, w = bgr_image.shape[:2]
-        thumb_w = 180
+        thumb_w = 210
         thumb_h = int(h * (thumb_w / w))
         resized = cv2.resize(bgr_image, (thumb_w, thumb_h))
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         self.thumbnail_surface = pygame.image.frombuffer(
             rgb.tobytes(), (thumb_w, thumb_h), "RGB"
         )
-
-        # Convert face crop if present
-        if face_bgr_image is not None and face_bgr_image.size > 0:
-            fh, fw = face_bgr_image.shape[:2]
-            f_size = 70
-            f_resized = cv2.resize(face_bgr_image, (f_size, f_size))
-            f_rgb = cv2.cvtColor(f_resized, cv2.COLOR_BGR2RGB)
-            self.face_thumbnail_surface = pygame.image.frombuffer(
-                f_rgb.tobytes(), (f_size, f_size), "RGB"
-            )
-        else:
-            self.face_thumbnail_surface = None
 
     def draw(self, surface: pygame.Surface, font_title: pygame.font.Font, font_desc: pygame.font.Font):
         if self.start_time is None or self.thumbnail_surface is None:
@@ -250,7 +265,6 @@ class PreviewToast:
         if elapsed >= self.display_duration:
             self.start_time = None
             self.thumbnail_surface = None
-            self.face_thumbnail_surface = None
             return
 
         # Slide-in / fade-out alpha
@@ -260,9 +274,8 @@ class PreviewToast:
             alpha = max(0, min(255, int(255 * fade_frac)))
 
         thumb_w, thumb_h = self.thumbnail_surface.get_size()
-        has_face = self.face_thumbnail_surface is not None
-        card_w = thumb_w + (90 if has_face else 24)
-        card_h = thumb_h + 60
+        card_w = thumb_w + 24
+        card_h = thumb_h + 54
 
         card_x = surface.get_width() - card_w - 24
         card_y = 20
@@ -277,28 +290,14 @@ class PreviewToast:
         thumb_with_alpha.set_alpha(alpha)
         card_surf.blit(thumb_with_alpha, (12, 12))
 
-        # Blit face thumbnail if available
-        if has_face and self.face_thumbnail_surface:
-            face_with_alpha = self.face_thumbnail_surface.copy()
-            face_with_alpha.set_alpha(alpha)
-            fx = 12 + thumb_w + 10
-            fy = 12
-            # Face box outline
-            pygame.draw.rect(card_surf, (230, 230, 235, alpha), pygame.Rect(fx - 2, fy - 2, 74, 74), border_radius=4)
-            card_surf.blit(face_with_alpha, (fx, fy))
-            face_tag = font_desc.render("CROP", True, (60, 60, 70))
-            face_tag.set_alpha(alpha)
-            card_surf.blit(face_tag, (fx + 18, fy + 78))
-
         # Bottom label
-        tag_text = "FULL + FACE SAVED" if has_face else "SAVED TO DISK"
-        tag_surf = font_desc.render(tag_text, True, (40, 160, 60))
+        tag_surf = font_desc.render("SAVED TO DISK", True, (40, 160, 60))
         tag_surf.set_alpha(alpha)
         card_surf.blit(tag_surf, (12, 12 + thumb_h + 6))
 
-        name_surf = font_title.render(self.saved_filename[:20], True, (30, 30, 35))
+        name_surf = font_title.render(self.saved_filename[:24], True, (30, 30, 35))
         name_surf.set_alpha(alpha)
-        card_surf.blit(name_surf, (12, 12 + thumb_h + 24))
+        card_surf.blit(name_surf, (12, 12 + thumb_h + 22))
 
         surface.blit(card_surf, (card_x, card_y))
 

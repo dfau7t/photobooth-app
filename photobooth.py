@@ -30,6 +30,7 @@ class PhotoboothApp:
         cam_height: int = 720,
         mirror: bool = True,
         fullscreen: bool = False,
+        min_faces: int = 3,
         window_width: int = 1100,
         window_height: int = 750,
     ):
@@ -40,6 +41,8 @@ class PhotoboothApp:
         self.cam_height = cam_height
         self.mirror = mirror
         self.is_fullscreen = fullscreen
+        self.min_faces_required = min_faces
+        self.face_alert_time: float = 0.0
         self.window_width = window_width
         self.window_height = window_height
         self.saved_window_w = window_width
@@ -107,23 +110,13 @@ class PhotoboothApp:
         btn_y = sh - bar_height + 18
         btn_h = 44
 
-        # Primary action: Snap
+        # Primary action: Snap (defaults to 3s timer countdown)
         btn_snap = ui.Button(
-            rect=pygame.Rect(0, 0, 190, btn_h),
-            label="SNAP PHOTO",
+            rect=pygame.Rect(0, 0, 220, btn_h),
+            label="SNAP (3s TIMER)",
             shortcut="SPACE",
             bg_color=ui.ACCENT_RED,
             hover_color=(250, 90, 90),
-            on_click=self.take_photo,
-        )
-
-        # Timer action: 3s Countdown
-        btn_timer = ui.Button(
-            rect=pygame.Rect(0, 0, 190, btn_h),
-            label="3s TIMER",
-            shortcut="C",
-            bg_color=ui.ACCENT_BLUE,
-            hover_color=(75, 145, 255),
             on_click=self.start_countdown,
         )
 
@@ -147,7 +140,7 @@ class PhotoboothApp:
             on_click=self.quit,
         )
 
-        all_btns = [btn_snap, btn_timer, btn_fs, btn_quit]
+        all_btns = [btn_snap, btn_fs, btn_quit]
         total_w = sum(b.rect.width for b in all_btns) + (len(all_btns) - 1) * 16
         start_x = max(20, (sw - total_w) // 2)
 
@@ -157,6 +150,9 @@ class PhotoboothApp:
             b.rect.y = btn_y
             curr_x += b.rect.width + 16
 
+        self.btn_snap = btn_snap
+        self.btn_fs = btn_fs
+        self.btn_quit = btn_quit
         self.buttons = all_btns
 
     def toggle_fullscreen(self):
@@ -180,11 +176,25 @@ class PhotoboothApp:
         self._rebuild_buttons()
 
     def start_countdown(self):
+        if len(self.detected_faces) < self.min_faces_required:
+            print(
+                f"[Photobooth] ⚠️ Countdown blocked: {len(self.detected_faces)}/{self.min_faces_required} faces detected."
+            )
+            self.face_alert_time = time.time()
+            return
         if not self.countdown_overlay.is_active:
             self.countdown_overlay.start()
 
     def take_photo(self):
         """Captures the current frame, detects faces, and saves both full & cropped images."""
+        if len(self.detected_faces) < self.min_faces_required:
+            print(
+                f"[Photobooth] ⚠️ Photo blocked: {len(self.detected_faces)}/{self.min_faces_required} faces detected. "
+                f"Need at least {self.min_faces_required} faces to snap!"
+            )
+            self.face_alert_time = time.time()
+            return
+
         success, frame = self.camera.read_frame()
         if not success or frame is None:
             print("[Photobooth] Error: Failed to capture frame.")
@@ -212,12 +222,9 @@ class PhotoboothApp:
         filename = os.path.basename(file_path)
         print(f"[Photobooth] 📸 Full photo #{self.photos_taken_count} saved to: {file_path}")
 
-        # 2. Detect and Crop Faces
-        sim_box = self.camera.get_simulated_face_box()
-        faces = self.face_detector.detect_faces(frame, fallback_box=sim_box)
-
-        primary_face_crop = None
-        primary_face_filename = ""
+        # 2. Detect and Crop Faces (saved to disk in background)
+        sim_boxes = self.camera.get_simulated_face_boxes()
+        faces = self.face_detector.detect_faces(frame, fallback_boxes=sim_boxes)
 
         if faces:
             print(f"[Photobooth] 👤 Detected {len(faces)} face(s) in photo:")
@@ -235,21 +242,13 @@ class PhotoboothApp:
                     f_path = os.path.join(self.save_dir, f_filename)
                     if self.camera.save_frame(face_crop, f_path):
                         print(f"   └── Saved cropped face: {f_path}")
-                        if f_idx == 0:
-                            primary_face_crop = face_crop
-                            primary_face_filename = f_filename
         else:
             print("[Photobooth] ℹ️  No faces detected in this shot.")
 
-        # Visual & Audio feedback
+        # Visual & Audio feedback (preview shows only the full photo)
         self.flash_overlay.trigger()
         self.audio.play_shutter()
-        self.preview_toast.show(
-            frame,
-            filename,
-            face_bgr_image=primary_face_crop,
-            face_filename=primary_face_filename,
-        )
+        self.preview_toast.show(frame, filename)
 
     def quit(self):
         self.running = False
@@ -277,11 +276,12 @@ class PhotoboothApp:
                 if event.key in (pygame.K_ESCAPE, pygame.K_q):
                     self.quit()
                     return
-                elif event.key == pygame.K_SPACE:
-                    # Instant snap
-                    self.take_photo()
-                elif event.key in (pygame.K_c, pygame.K_RETURN):
-                    # 3-second countdown
+                elif self.camera.is_simulated and event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                    cnt = int(event.unicode)
+                    self.camera.set_simulated_face_count(cnt)
+                    print(f"[Photobooth Demo] Switched simulated faces to: {cnt}")
+                elif event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_c):
+                    # Default snap mode: starts 3-second countdown
                     self.start_countdown()
                 elif event.key == pygame.K_f:
                     self.toggle_fullscreen()
@@ -293,7 +293,7 @@ class PhotoboothApp:
 
     def run(self):
         print(f"[Photobooth] Started. Photos will be saved to: {self.save_dir}")
-        print("  - Controls: SPACE = Take photo | C = 3s Countdown | F = Fullscreen | Q/ESC = Quit")
+        print("  - Controls: SPACE / ENTER = Snap photo (3s timer) | F = Fullscreen | Q/ESC = Quit")
 
         while self.running:
             self.handle_events()
@@ -309,8 +309,28 @@ class PhotoboothApp:
 
             # Live face detection
             if success and frame is not None:
-                sim_box = self.camera.get_simulated_face_box()
-                self.detected_faces = self.face_detector.detect_faces(frame, fallback_box=sim_box)
+                sim_boxes = self.camera.get_simulated_face_boxes()
+                self.detected_faces = self.face_detector.detect_faces(frame, fallback_boxes=sim_boxes)
+
+            face_cnt = len(self.detected_faces)
+            can_snap = (face_cnt >= self.min_faces_required)
+
+            # Abort countdown if face detection drops below minimum during countdown
+            if self.countdown_overlay.is_active and not can_snap:
+                self.countdown_overlay.cancel()
+                self.face_alert_time = time.time()
+                print(f"[Photobooth] ⚠️ Countdown cancelled: Lost 3-face detection ({face_cnt}/{self.min_faces_required})")
+
+            # Update Snap button state (greys out when < 3 faces or while counting down)
+            if self.countdown_overlay.is_active:
+                self.btn_snap.enabled = False
+                self.btn_snap.label = "COUNTING DOWN..."
+            else:
+                self.btn_snap.enabled = can_snap
+                if can_snap:
+                    self.btn_snap.label = "SNAP (3s TIMER)"
+                else:
+                    self.btn_snap.label = f"SNAP ({face_cnt}/{self.min_faces_required} FACES)"
 
             # Clear background
             self.screen.fill(ui.BG_DARK)
@@ -326,10 +346,13 @@ class PhotoboothApp:
 
             # Counter / Status badge
             mode_badge = "DEMO (SIMULATED)" if self.camera.is_simulated else "LIVE WEBCAM"
-            badge_color = ui.ACCENT_AMBER if self.camera.is_simulated else (50, 200, 100)
-            face_cnt = len(self.detected_faces)
-            face_label = f"{face_cnt} Face" if face_cnt == 1 else f"{face_cnt} Faces"
-            status_text = f"● {mode_badge}   |   👤 {face_label}   |   {self.photos_taken_count} Snaps"
+            if can_snap:
+                face_badge = f"✅ {face_cnt} Faces (Ready!)"
+                badge_color = (50, 220, 100)
+            else:
+                face_badge = f"⚠️ Need {self.min_faces_required} Faces ({face_cnt}/{self.min_faces_required})"
+                badge_color = ui.ACCENT_AMBER
+            status_text = f"● {mode_badge}   |   {face_badge}   |   {self.photos_taken_count} Snaps"
             status_surf = self.font_btn.render(status_text, True, badge_color)
             self.screen.blit(status_surf, (sw - status_surf.get_width() - 24, 16))
 
@@ -375,6 +398,28 @@ class PhotoboothApp:
                         confidence=face_info.get("confidence", 1.0),
                     )
 
+                # If less than 3 faces detected, draw instruction pill on viewfinder
+                if not can_snap:
+                    alert_elapsed = time.time() - self.face_alert_time
+                    is_alerting = (alert_elapsed < 1.8)
+                    pill_w = 440
+                    pill_h = 36
+                    pill_x = cam_x + (draw_w - pill_w) // 2
+                    pill_y = cam_y + draw_h - pill_h - 16
+                    pill_surf = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+                    bg_col = (180, 45, 45, 215) if is_alerting else (26, 28, 36, 205)
+                    pygame.draw.rect(pill_surf, bg_col, (0, 0, pill_w, pill_h), border_radius=18)
+                    border_col = (255, 90, 90) if is_alerting else (90, 95, 110)
+                    pygame.draw.rect(pill_surf, border_col, (0, 0, pill_w, pill_h), width=1, border_radius=18)
+
+                    warn_msg = f"👥 GROUP MODE: 3 faces required to snap ({face_cnt}/{self.min_faces_required} detected)"
+                    msg_surf = self.font_hint.render(warn_msg, True, (245, 245, 250))
+                    pill_surf.blit(
+                        msg_surf,
+                        (pill_w // 2 - msg_surf.get_width() // 2, pill_h // 2 - msg_surf.get_height() // 2),
+                    )
+                    self.screen.blit(pill_surf, (pill_x, pill_y))
+
             # Bottom Control Bar
             footer_rect = pygame.Rect(0, sh - 80, sw, 80)
             pygame.draw.rect(self.screen, ui.SURFACE_DARK, footer_rect)
@@ -398,7 +443,7 @@ class PhotoboothApp:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Photobooth Studio (v1)")
+    parser = argparse.ArgumentParser(description="Photobooth Studio (v2)")
     parser.add_argument(
         "--save-dir",
         default="photos",
@@ -423,6 +468,12 @@ def main():
         help="Target camera capture height (default: 720)",
     )
     parser.add_argument(
+        "--min-faces",
+        type=int,
+        default=3,
+        help="Minimum faces required to take a photo (default: 3)",
+    )
+    parser.add_argument(
         "--no-mirror",
         action="store_true",
         help="Disable horizontal mirror reflection",
@@ -442,6 +493,7 @@ def main():
         cam_height=args.height,
         mirror=not args.no_mirror,
         fullscreen=args.fullscreen,
+        min_faces=args.min_faces,
     )
     app.run()
 

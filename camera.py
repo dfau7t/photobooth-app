@@ -6,7 +6,7 @@ and saving images to disk.
 
 import time
 import math
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import pygame
 import cv2
 import numpy as np
@@ -30,7 +30,8 @@ class Camera:
         self.cap: Optional[cv2.VideoCapture] = None
         self.active_index: Optional[int] = None
         self.is_simulated = False
-        self.simulated_face_box: Optional[Tuple[int, int, int, int]] = None
+        self.simulated_face_count: int = 3
+        self.simulated_face_boxes: List[Tuple[int, int, int, int]] = []
         self._sim_start_time = time.time()
 
         self._initialize_camera()
@@ -110,46 +111,64 @@ class Camera:
         cv2.line(frame, (0, h // 3), (w, h // 3), grid_color, 1)
         cv2.line(frame, (0, 2 * h // 3), (w, 2 * h // 3), grid_color, 1)
 
-        # Draw animated avatar / subject
-        center_x = int(w / 2 + 30 * math.sin(elapsed * 1.5))
-        center_y = int(h / 2 + 15 * math.cos(elapsed * 1.8))
-        self.simulated_face_box = (center_x - 85, center_y - 85, 170, 190)
+        # Draw animated avatars (supports 1, 2, or 3 subjects in booth)
+        self.simulated_face_boxes = []
 
-        # Avatar head & shoulders
-        cv2.ellipse(
-            frame,
-            (center_x, center_y + 140),
-            (140, 90),
-            0,
-            0,
-            180,
-            (120, 100, 220),
-            -1,
-            cv2.LINE_AA,
-        )
-        cv2.circle(frame, (center_x, center_y), 70, (235, 205, 185), -1, cv2.LINE_AA)
-        cv2.circle(frame, (center_x - 22, center_y - 10), 8, (50, 40, 35), -1, cv2.LINE_AA)
-        cv2.circle(frame, (center_x + 22, center_y - 10), 8, (50, 40, 35), -1, cv2.LINE_AA)
+        def draw_avatar(cx, cy, shirt_col, skin_col, scale=1.0):
+            r = int(55 * scale)
+            # Shoulders / body
+            cv2.ellipse(
+                frame,
+                (cx, cy + int(120 * scale)),
+                (int(115 * scale), int(75 * scale)),
+                0,
+                0,
+                180,
+                shirt_col,
+                -1,
+                cv2.LINE_AA,
+            )
+            # Head
+            cv2.circle(frame, (cx, cy), r, skin_col, -1, cv2.LINE_AA)
+            # Eyes
+            eye_off_x = int(18 * scale)
+            eye_off_y = int(8 * scale)
+            cv2.circle(frame, (cx - eye_off_x, cy - eye_off_y), int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx + eye_off_x, cy - eye_off_y), int(6 * scale), (45, 40, 35), -1, cv2.LINE_AA)
+            # Smile
+            cv2.ellipse(
+                frame,
+                (cx, cy + int(14 * scale)),
+                (int(20 * scale), int(12 * scale)),
+                0,
+                0,
+                180,
+                (40, 30, 80),
+                2,
+                cv2.LINE_AA,
+            )
+            # Cheerful cheeks
+            cv2.circle(frame, (cx - int(28 * scale), cy + int(10 * scale)), int(8 * scale), (160, 150, 240), -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx + int(28 * scale), cy + int(10 * scale)), int(8 * scale), (160, 150, 240), -1, cv2.LINE_AA)
 
-        # Smile
-        cv2.ellipse(
-            frame,
-            (center_x, center_y + 18),
-            (25, 16),
-            0,
-            0,
-            180,
-            (40, 30, 80),
-            3,
-            cv2.LINE_AA,
-        )
+            box_size = int(140 * scale)
+            self.simulated_face_boxes.append((cx - box_size // 2, cy - box_size // 2, box_size, box_size))
 
-        # Cheerful cheeks
-        cv2.circle(frame, (center_x - 35, center_y + 12), 10, (160, 150, 240), -1, cv2.LINE_AA)
-        cv2.circle(frame, (center_x + 35, center_y + 12), 10, (160, 150, 240), -1, cv2.LINE_AA)
+        sway = int(20 * math.sin(elapsed * 1.5))
+        bob = int(10 * math.cos(elapsed * 1.8))
+
+        if self.simulated_face_count == 1:
+            draw_avatar(w // 2 + sway, h // 2 + bob, (120, 100, 220), (235, 205, 185), scale=1.1)
+        elif self.simulated_face_count == 2:
+            draw_avatar(w // 2 - 170 + sway, h // 2 + bob, (210, 100, 110), (235, 205, 185), scale=1.0)
+            draw_avatar(w // 2 + 170 + sway, h // 2 - bob, (80, 170, 120), (240, 215, 195), scale=1.0)
+        else:  # 3 faces
+            draw_avatar(w // 2 - 250 + sway, h // 2 + 15 + bob, (210, 100, 110), (235, 205, 185), scale=0.95)
+            draw_avatar(w // 2 + sway, h // 2 - 20 - bob, (120, 100, 220), (245, 215, 190), scale=1.05)
+            draw_avatar(w // 2 + 250 + sway, h // 2 + 20 + bob, (80, 170, 120), (230, 200, 180), scale=0.95)
 
         # Header banner
-        banner_text = "SIMULATED CAMERA (DEMO MODE)"
+        banner_text = f"SIMULATED CAMERA ({self.simulated_face_count} Faces Mocked)"
         cv2.rectangle(frame, (0, 0), (w, 48), (20, 20, 25), -1)
         cv2.putText(
             frame,
@@ -163,7 +182,7 @@ class Camera:
         )
 
         # Status & hint
-        hint_text = "Check macOS System Settings > Privacy > Camera if using real webcam"
+        hint_text = "Demo: Press 1, 2, or 3 to change face count | Use real webcam for physical faces"
         cv2.putText(
             frame,
             hint_text,
@@ -190,9 +209,18 @@ class Camera:
 
         return frame
 
+    def set_simulated_face_count(self, count: int) -> None:
+        """Sets number of simulated faces to render (1, 2, or 3)."""
+        self.simulated_face_count = max(1, min(5, count))
+
+    def get_simulated_face_boxes(self) -> List[Tuple[int, int, int, int]]:
+        """Returns the simulated face bounding boxes if running in demo mode."""
+        return self.simulated_face_boxes if self.is_simulated else []
+
     def get_simulated_face_box(self) -> Optional[Tuple[int, int, int, int]]:
-        """Returns the simulated face bounding box if running in demo mode."""
-        return self.simulated_face_box if self.is_simulated else None
+        """Returns the primary simulated face bounding box."""
+        boxes = self.get_simulated_face_boxes()
+        return boxes[0] if boxes else None
 
     def save_frame(self, frame: np.ndarray, file_path: str) -> bool:
         """Saves the given frame as a JPEG/PNG image."""
