@@ -26,6 +26,14 @@ This document provides essential instructions, architectural guidelines, technic
   - **Animated Constellation Connecting Line**: After row selections complete, an animated vibrant pink line (`#E44B7D`, 6px) smoothly sweeps through and connects each selected feature node, matching the Swiss minimalist design aesthetic from the reference layout.
   - **Resulting Hybrid Reveal**: Once the connecting line finishes, the chimeric hybrid portrait card and recipe breakdown are displayed with interactive controls (<kbd>SPACE</kbd> next/skip, <kbd>R</kbd> replay, <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> direct jump, <kbd>V</kbd> live camera).
   - **External Hardware Shutter Trigger via OSC**: Zero-dependency UDP receiver listening for `/button/press` OSC 1.0 messages from an Arduino Nano ESP32 button, debouncing and dispatching safely to the main Pygame UI loop.
+- **V4**: Waiting attractor screen carousel & face crop persistence:
+  - **Animated Multi-Row Waiting Screen**: Multi-row horizontal carousel displaying all detected face crops collected throughout the runtime of the application (and loaded from disk on boot).
+  - **Alternating Direction Carousel**: Rows alternate in scrolling direction (Row 0 scrolls left, Row 1 scrolls right, Row 2 scrolls left, etc.) with staggered speeds for dynamic visual rhythm and seamless infinite modulo wrapping.
+  - **Attractor Standby Overlay**: Central frosted dark card with pulsing accent glow (`#E44B7D`), guest counter, and clear instructions ("Step Up to the Camera", "3 Faces Required for Chimeric Mix").
+  - **Automatic Idle Management**: Automatically enters the waiting screen if 0 faces are seen for $\ge 15$s (`--idle-timeout`); immediately wakes up to live viewfinder when a face steps in view, when the hardware button/OSC message is received, or when any key/click occurs. Manual toggle available via <kbd>W</kbd>.
+  - **Disk Persistence for Cropped Face Images**: Restored automatic saving of square cropped face portraits to disk (`_person1.jpg`, `_person2.jpg`, etc.) upon photo snap, feeding the live waiting screen gallery across restarts.
+  - **Silent UI Background Saving**: The preview toast pop-up continues displaying *only* the full group photo (cropped faces are saved quietly in the background without UI clutter).
+  - **Resource Cleanup**: Explicit `FaceDetector.close()`, `Camera.release()`, and `OSCReceiver.stop()` in `app.quit()` to prevent GPU Metal / AVFoundation handle leaks.
 
 ---
 
@@ -66,6 +74,7 @@ git status -s
 | `feature_extractor.py` | Isolates facial features per person (`eyes`, `right_eye`, `left_eye`, `nose`, `mouth`, `left_ear`, `right_ear`, `ears`, `face`). Features are leveled using `_safe_crop_oriented()`. Returns landmarks, head tilt angle, and crop origins. |
 | `slot_animator.py` | Manages timing, ease-out deceleration, and state transitions for the slot-machine feature selection reel and the sweeping animated connection line. Emits audio event triggers (`tick`, `lock`, `line_start`, `line_complete`). |
 | `osc_receiver.py` | Background UDP socket listener and binary OSC 1.0 parser. Decodes `/button/press` packets from Arduino hardware and dispatches triggers to the main UI thread with debouncing. |
+| `waiting_screen.py` | Standby attractor screen rendering an infinite multi-row horizontal carousel of all detected face crops alternating in scroll direction, with Swiss minimalist standby card and guest statistics. |
 | `collage_generator.py` | Synthesizes randomized chimeric hybrid portraits with `_overlay_rotated_cutout()` matching base face rotation, scale, and landmark coordinates. Builds the A4 Master Face Collage poster (1240×1754) with the 3 hybrids centered horizontally, and renders the interactive Feature Breakdown Grid view. |
 | `ui.py` | UI components: `Button` (with disabled/greyed-out, hover, and click states), `CountdownOverlay`, `FlashOverlay`, `PreviewToast`, viewfinder guide lines, and `draw_face_box()`. |
 | `audio.py` | Synthesized countdown beeps and camera shutter sounds generated via `pygame.mixer` byte arrays, with graceful degradation when audio devices are inaccessible. |
@@ -101,12 +110,13 @@ git status -s
 - **Rule**: Always import `pygame` before `cv2` and `mediapipe` in scripts.
 
 ### 6. Storage & File Output Policy
-- **Rule**: Do **NOT** save individual feature crops (`_person1_eyes.jpg`, etc.) to disk.
+- **Rule**: Do **NOT** save loose feature crops (`_person1_eyes.jpg`, `_nose.jpg`, `_ears.jpg`, `_mouth.jpg`) to disk.
 - Only save:
   1. Full group photo: `photobooth_YYYYMMDD_HHMMSS.jpg`
-  2. Master Face Collage poster: `photobooth_YYYYMMDD_HHMMSS_collage.jpg`
-  3. 3 Chimeric Hybrid portraits: `photobooth_YYYYMMDD_HHMMSS_hybrid1.jpg`, `_hybrid2.jpg`, `_hybrid3.jpg`
-- The on-screen pop-up preview toast must show **only** the full group picture.
+  2. Individual cropped face portraits: `photobooth_YYYYMMDD_HHMMSS_person1.jpg`, `_person2.jpg`, `_person3.jpg` (feeds waiting screen gallery across restarts)
+  3. Master Face Collage poster: `photobooth_YYYYMMDD_HHMMSS_collage.jpg`
+  4. 3 Chimeric Hybrid portraits: `photobooth_YYYYMMDD_HHMMSS_hybrid1.jpg`, `_hybrid2.jpg`, `_hybrid3.jpg`
+- The on-screen pop-up preview toast must show **only** the full group picture (cropped face images do not appear on the UI preview toast).
 
 ### 7. Feature Rotation & Ear Positioning
 - **Rotation Matching**: In `CollageGenerator.create_chimeric_face()`, features are rotated by `-angle` in `cv2.getRotationMatrix2D` to match the base face tilt.
@@ -153,6 +163,7 @@ PYTHONPATH=. .venv/bin/python3 tests/test_photobooth.py
 | `--min-faces` | `3` | Minimum number of detected faces required to enable snap. |
 | `--no-mirror` | `False` | Disables horizontal mirror flip. |
 | `--fullscreen`| `False` | Starts directly in fullscreen mode. |
+| `--idle-timeout` | `15.0` | Seconds of inactivity without faces before switching to Waiting Screen carousel. |
 | `--osc-port`  | `8000` | UDP port to listen for Arduino OSC button messages. |
 | `--osc-address` | `"/button/press"` | OSC address pattern that triggers the shutter. |
 | `--no-osc`    | `False` | Disables background OSC UDP receiver. |

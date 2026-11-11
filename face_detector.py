@@ -64,6 +64,15 @@ class FaceDetector:
             print(f"[FaceDetector] Error initializing MediaPipe FaceDetector: {e}")
             self.detector = None
 
+    def close(self):
+        """Closes the MediaPipe FaceDetector and releases C++/Metal resources."""
+        if self.detector is not None:
+            try:
+                self.detector.close()
+            except Exception:
+                pass
+            self.detector = None
+
     def detect_faces(
         self,
         frame: Optional[np.ndarray],

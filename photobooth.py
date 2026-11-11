@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Photobooth Application (v3)
+Photobooth Application (v4)
 A native desktop photobooth app featuring camera access, live mirrored preview,
 3-face group detection requirement, countdown timer, audio cues, individual facial
-feature extraction (eyes, ears, nose, mouth), and chimeric face collage generation.
+feature extraction (eyes, ears, nose, mouth), chimeric face collage generation,
+hardware button OSC trigger, and an attractor waiting screen carousel of all detected faces.
 """
 
 import os
@@ -11,7 +12,7 @@ import sys
 import time
 import argparse
 from datetime import datetime
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 
 # Import pygame before cv2 to avoid SDL symbol conflict warnings on macOS
 import pygame
@@ -24,6 +25,7 @@ from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
 from osc_receiver import OSCReceiver
+from waiting_screen import WaitingScreenRenderer
 from audio import SoundEffects
 import ui
 
@@ -43,6 +45,7 @@ class PhotoboothApp:
         osc_port: int = 8000,
         osc_address: str = "/button/press",
         enable_osc: bool = True,
+        idle_timeout: float = 15.0,
     ):
         self.save_dir = os.path.abspath(save_dir)
         os.makedirs(self.save_dir, exist_ok=True)
@@ -57,6 +60,10 @@ class PhotoboothApp:
         self.window_height = window_height
         self.saved_window_w = window_width
         self.saved_window_h = window_height
+        self.idle_timeout = idle_timeout
+        self.last_face_seen_time = time.time()
+        self.showing_waiting_screen: bool = False
+        self.waiting_screen_start_time: float = 0.0
 
         # Initialize Pygame
         pygame.init()
@@ -102,10 +109,11 @@ class PhotoboothApp:
             mirror=mirror,
         )
 
-        # Face Detector & Feature Extractor & Collage Generator
+        # Face Detector & Feature Extractor & Collage Generator & Waiting Screen
         self.face_detector = FaceDetector()
         self.feature_extractor = FeatureExtractor()
         self.collage_generator = CollageGenerator()
+        self.waiting_screen = WaitingScreenRenderer(save_dir=self.save_dir)
         self.detected_faces = []
         self.latest_collage: Optional[np.ndarray] = None
         self.latest_people_features: List[Dict[str, Any]] = []
@@ -254,12 +262,32 @@ class PhotoboothApp:
 
         self._rebuild_buttons()
 
+    def toggle_waiting_screen(self):
+        """Toggles between the waiting attractor carousel and live viewfinder."""
+        self.showing_waiting_screen = not self.showing_waiting_screen
+        if self.showing_waiting_screen:
+            self.waiting_screen_start_time = time.time()
+            self.showing_feature_grid = False
+            self.countdown_overlay.is_active = False
+            print("[Photobooth] 💤 Entered Waiting Screen carousel.")
+        else:
+            self.last_face_seen_time = time.time()
+            self._rebuild_buttons()
+            print("[Photobooth] 👁️ Woke up from Waiting Screen -> Live Viewfinder.")
+
     def on_osc_trigger(self, args=None):
         """Callback triggered when an OSC message is received from the hardware button."""
         print(f"[Photobooth] 🔘 Hardware Button Press received via OSC (arg={args}) -> Triggering Shutter")
+        if self.showing_waiting_screen:
+            self.toggle_waiting_screen()
+            return
         self.start_countdown()
 
     def start_countdown(self):
+        if self.showing_waiting_screen:
+            self.toggle_waiting_screen()
+            return
+
         if self.showing_feature_grid:
             animator = self.slot_animators.get(self.feature_grid_collage_idx)
             elapsed = time.time() - self.feature_grid_anim_start
@@ -334,7 +362,14 @@ class PhotoboothApp:
                 p_num = f_idx + 1
                 feats = self.feature_extractor.extract_features(frame, face_info)
                 people_features.append(feats)
-                print(f"   ├── Person #{p_num}: extracted facial features (eyes, nose, mouth, ears, face)")
+
+                # Save individual cropped face image to disk (V4 requirement)
+                face_crop_path = os.path.join(self.save_dir, f"{name_root}_person{p_num}{ext}")
+                self.camera.save_frame(feats["face"], face_crop_path)
+                print(f"   ├── Person #{p_num}: saved face crop to {os.path.basename(face_crop_path)}")
+
+                # Add newly captured face to the waiting screen gallery
+                self.waiting_screen.add_face(feats["face"])
 
             # 3. Generate Master Face Collage formatted for A4 Sheet (1240 x 1754)
             collage_img = self.collage_generator.generate_collage(people_features, timestamp_str)
@@ -365,6 +400,10 @@ class PhotoboothApp:
 
     def quit(self):
         self.running = False
+        if getattr(self, "face_detector", None):
+            self.face_detector.close()
+        if getattr(self, "camera", None):
+            self.camera.release()
         if getattr(self, "osc_receiver", None):
             self.osc_receiver.stop()
 
@@ -391,18 +430,34 @@ class PhotoboothApp:
                     )
                     self._rebuild_buttons()
 
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.showing_waiting_screen:
+                    self.toggle_waiting_screen()
+                    continue
+
             if event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_ESCAPE, pygame.K_q):
-                    if self.showing_feature_grid:
+                    if self.showing_waiting_screen:
+                        self.toggle_waiting_screen()
+                    elif self.showing_feature_grid:
                         self.toggle_feature_grid()
                     else:
                         self.quit()
+                    return
+
+                if self.showing_waiting_screen:
+                    # Any key wakes up from waiting screen
+                    self.toggle_waiting_screen()
+                    return
+
+                if event.key == pygame.K_w:
+                    self.toggle_waiting_screen()
                     return
                 elif self.showing_feature_grid and event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
                     self.start_feature_grid_animation(int(event.unicode) - 1)
                 elif self.showing_feature_grid and event.key == pygame.K_r:
                     self.start_feature_grid_animation(self.feature_grid_collage_idx)
-                elif self.camera.is_simulated and not self.showing_feature_grid and event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                elif self.camera.is_simulated and not self.showing_feature_grid and event.key in (pygame.K_0, pygame.K_1, pygame.K_2, pygame.K_3):
                     cnt = int(event.unicode)
                     self.camera.set_simulated_face_count(cnt)
                     print(f"[Photobooth Demo] Switched simulated faces to: {cnt}")
@@ -474,6 +529,20 @@ class PhotoboothApp:
             face_cnt = len(self.detected_faces)
             can_snap = (face_cnt >= self.min_faces_required)
 
+            # Idle timeout management: transition to Waiting Screen if no faces are seen
+            if face_cnt > 0:
+                self.last_face_seen_time = time.time()
+                if self.showing_waiting_screen:
+                    print(f"[Photobooth] 👤 {face_cnt} face(s) appeared -> Waking up from Waiting Screen!")
+                    self.showing_waiting_screen = False
+                    self._rebuild_buttons()
+            else:
+                if not self.showing_feature_grid and not self.countdown_overlay.is_active and not self.showing_waiting_screen:
+                    if (time.time() - self.last_face_seen_time) >= self.idle_timeout:
+                        self.showing_waiting_screen = True
+                        self.waiting_screen_start_time = time.time()
+                        print("[Photobooth] 💤 Idle timeout reached. Entering Waiting Screen carousel.")
+
             # Update Snap & Feature Grid button states
             has_features = len(self.latest_people_features) > 0 or self.latest_collage is not None
             self.btn_collage.enabled = has_features
@@ -504,8 +573,11 @@ class PhotoboothApp:
                 else:
                     self.btn_snap.label = f"SNAP ({face_cnt}/{self.min_faces_required} FACES)"
 
-            # Render Center View: Feature Grid View OR Live Camera Feed
-            if self.showing_feature_grid and (self.latest_people_features or self.latest_collage is not None):
+            # Render Center View: Waiting Screen OR Feature Grid View OR Live Camera Feed
+            if self.showing_waiting_screen:
+                elapsed_wait = time.time() - self.waiting_screen_start_time if self.waiting_screen_start_time > 0 else 0.0
+                self.waiting_screen.render(self.screen, elapsed_wait)
+            elif self.showing_feature_grid and (self.latest_people_features or self.latest_collage is not None):
                 self.screen.fill((236, 238, 238))
                 elapsed_anim = time.time() - self.feature_grid_anim_start if self.feature_grid_anim_start > 0 else -1.0
                 grid_view = self.collage_generator.generate_feature_grid_view(
@@ -624,16 +696,19 @@ class PhotoboothApp:
                         )
                         self.screen.blit(pill_surf, (pill_x, pill_y))
 
-            # Bottom Control Bar
-            footer_rect = pygame.Rect(0, sh - 80, sw, 80)
-            pygame.draw.rect(self.screen, ui.SURFACE_DARK, footer_rect)
-            pygame.draw.line(self.screen, ui.SURFACE_BORDER, (0, sh - 80), (sw, sh - 80), 1)
+            if not self.showing_waiting_screen:
+                # Bottom Control Bar
+                footer_rect = pygame.Rect(0, sh - 80, sw, 80)
+                pygame.draw.rect(self.screen, ui.SURFACE_DARK, footer_rect)
+                pygame.draw.line(self.screen, ui.SURFACE_BORDER, (0, sh - 80), (sw, sh - 80), 1)
 
-            for b in self.buttons:
-                b.draw(self.screen, self.font_btn, self.font_hint)
+                for b in self.buttons:
+                    b.draw(self.screen, self.font_btn, self.font_hint)
 
-            # Overlays: Countdown, Flash, and Preview Toast
-            self.countdown_overlay.draw(self.screen, self.font_giant, self.font_title)
+                # Countdown Overlay
+                self.countdown_overlay.draw(self.screen, self.font_giant, self.font_title)
+
+            # Overlays: Flash and Preview Toast
             self.flash_overlay.draw(self.screen)
             self.preview_toast.draw(self.screen, self.font_toast_title, self.font_toast_desc)
 
@@ -649,7 +724,7 @@ class PhotoboothApp:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Photobooth Studio (v3)")
+    parser = argparse.ArgumentParser(description="Photobooth Studio (v4)")
     parser.add_argument(
         "--save-dir",
         default="photos",
@@ -690,6 +765,12 @@ def main():
         help="Start in fullscreen mode",
     )
     parser.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=15.0,
+        help="Seconds of inactivity before entering Waiting Screen (default: 15.0)",
+    )
+    parser.add_argument(
         "--osc-port",
         type=int,
         default=8000,
@@ -716,6 +797,7 @@ def main():
         mirror=not args.no_mirror,
         fullscreen=args.fullscreen,
         min_faces=args.min_faces,
+        idle_timeout=args.idle_timeout,
         osc_port=args.osc_port,
         osc_address=args.osc_address,
         enable_osc=not args.no_osc,

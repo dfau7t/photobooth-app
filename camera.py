@@ -4,6 +4,7 @@ Handles OpenCV camera capture, mirroring, fallback/demo simulation,
 and saving images to disk.
 """
 
+import os
 import time
 import math
 from typing import Optional, Tuple, List
@@ -39,6 +40,11 @@ class Camera:
 
     def _initialize_camera(self) -> None:
         """Attempt to open hardware camera or fallback to simulated pattern."""
+        if os.environ.get("SDL_VIDEODRIVER") == "dummy" or os.environ.get("HEADLESS_TEST"):
+            self.cap = None
+            self.is_simulated = True
+            return
+
         candidate_indices = [self.preferred_index]
         for idx in (0, 1, 2):
             if idx not in candidate_indices:
@@ -166,7 +172,9 @@ class Camera:
         sway = int(20 * math.sin(elapsed * 1.5))
         bob = int(10 * math.cos(elapsed * 1.8))
 
-        if self.simulated_face_count == 1:
+        if self.simulated_face_count == 0:
+            pass
+        elif self.simulated_face_count == 1:
             draw_avatar(w // 2 + sway, h // 2 + bob, (120, 100, 220), (235, 205, 185), scale=1.1)
         elif self.simulated_face_count == 2:
             draw_avatar(w // 2 - 170 + sway, h // 2 + bob, (210, 100, 110), (235, 205, 185), scale=1.0)
@@ -219,8 +227,8 @@ class Camera:
         return frame
 
     def set_simulated_face_count(self, count: int) -> None:
-        """Sets number of simulated faces to render (1, 2, or 3)."""
-        self.simulated_face_count = max(1, min(5, count))
+        """Sets number of simulated faces to render (0, 1, 2, or 3)."""
+        self.simulated_face_count = max(0, min(5, count))
 
     def get_simulated_face_boxes(self) -> List[Tuple[int, int, int, int]]:
         """Returns the simulated face bounding boxes if running in demo mode."""

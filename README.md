@@ -1,9 +1,9 @@
-# 📸 Photobooth Studio (v3)
+# 📸 Photobooth Studio (v4)
 
-A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **3-second countdown timer**, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, and **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation**, **A4-ready print posters**, and **hardware arcade button trigger via OSC (Arduino Nano ESP32)**.
+A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **3-second countdown timer**, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation**, **A4-ready print posters**, **hardware arcade button trigger via OSC (Arduino Nano ESP32)**, and an **animated multi-row waiting attractor screen carousel** with persistent face crop archiving.
 
 > [!NOTE]
-> **Release: v3** — Complete major release featuring Google MediaPipe 7-point facial landmark detection, in-memory leveled feature isolation, dynamic rotation matching to base portraits, ISO A4 poster layout ($1240 \times 1754$ px at 150 DPI), animated tactile Slot Machine Feature Breakdown Grid with constellation connecting line, and external hardware button shutter triggering via Open Sound Control (OSC 1.0 over UDP).
+> **Release: v4** — Major release introducing the **Waiting / Attractor Screen** with an infinite multi-row horizontal carousel of all detected face crops alternating in scroll direction, automatic idle transition when 0 faces are seen for 15s (`--idle-timeout`), immediate interactive wake-up, and restored **individual face crop disk persistence** (`_person1.jpg`, `_person2.jpg`, etc.) for gallery archiving across sessions while maintaining a clean, uncluttered UI preview.
 
 ---
 
@@ -30,13 +30,15 @@ Photos and collages are automatically saved to [`photos/`](photos/).
 | **External Arcade Button** | **Physical Button** *(Arduino ESP32 OSC)* | Triggers shutter / advances collages |
 | **Slot Machine Animation** | <kbd>SPACE</kbd> skips spinning reel or advances collage; <kbd>R</kbd> replays; <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> selects collage | `NEXT COLLAGE` / `SKIP SPIN` |
 | **Toggle Feature Grid / Camera** | <kbd>V</kbd> *(Or <kbd>ESC</kbd> to return to camera)* | `FEATURE GRID` / `LIVE CAMERA` |
+| **Toggle Waiting Screen** | <kbd>W</kbd> *(Or auto-activates after 15s idle)* | Standby Attractor Screen |
+| **Wake Up from Waiting** | Step into view, press physical button, <kbd>SPACE</kbd>, or tap screen | Resumes live camera viewfinder |
 | **Toggle Fullscreen** | <kbd>F</kbd> | `FULLSCREEN` / `WINDOWED` |
-| **Demo Face Count** | <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd> *(Demo Mode only)* | Changes simulated face count |
+| **Demo Face Count** | <kbd>0</kbd>, <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd> *(Demo Mode only)* | Changes simulated face count |
 | **Quit** | <kbd>Q</kbd> or <kbd>ESC</kbd> *(in camera mode)* | `QUIT` |
 
 ---
 
-## ✨ Features (v3)
+## ✨ Features (v4)
 
 ### 1. Facial Feature Extraction with Rotation Alignment
 When 3 faces are detected and the photo is snapped, the system isolates and crops individual facial anatomy in-memory for every person:
@@ -86,6 +88,23 @@ Directly inspired by the Swiss minimalist reference design:
 - In camera mode, pressing the physical button triggers the 3-second countdown (when $\ge 3$ faces are detected).
 - In Feature Breakdown Grid view, pressing the physical button skips the spinning animation or advances to the next collage.
 
+### 8. Animated Multi-Row Waiting Attractor Screen Carousel
+- When the booth is idle (no faces seen for $\ge 15$ seconds), the app smoothly transitions into a full-screen **attractor waiting screen**.
+- **Alternating Direction Marquee**: Displays a multi-row horizontal grid of all detected guest face crops collected throughout the runtime of the app (and loaded from disk across restarts).
+  - Row 0 scrolls Left ($\leftarrow$)
+  - Row 1 scrolls Right ($\rightarrow$)
+  - Row 2 scrolls Left ($\leftarrow$)
+  - Row 3 scrolls Right ($\rightarrow$)
+- Features smooth, seamless infinite modular wrapping with staggered row velocities for an organic mechanical reel aesthetic.
+- Includes a floating central standby card with breathing pulse border (`#E44B7D`), live guest count, and clear call-to-action ("Step Up to the Camera", "3 Faces Required for Chimeric Mix").
+- **Zero Friction Wake-Up**: Instantly transitions back to the live camera viewfinder as soon as anyone steps into view, when the external hardware button is pressed, or when any key/click is registered.
+- Can also be toggled manually at any time by pressing <kbd>W</kbd>.
+
+### 9. Persistent Cropped Face Image Archiving
+- When a photo is taken, individual square 1:1 face crops for all detected participants are automatically archived to disk (`_person1.jpg`, `_person2.jpg`, `_person3.jpg`).
+- The on-screen pop-up preview toast continues to display *only* the full group photo cleanly without UI clutter.
+- Stored face crops are automatically indexed by the Waiting Screen on startup, ensuring past guests' portraits immediately populate the carousel wall across app launches.
+
 ---
 
 ## ⚙️ Options & Customization
@@ -95,6 +114,9 @@ You can pass command-line arguments to customize your photobooth session:
 ```bash
 # Change the required minimum number of faces (default: 3)
 ./run.sh --min-faces 3
+
+# Configure idle timeout before Waiting Screen activates (default: 15.0s)
+./run.sh --idle-timeout 15.0
 
 # Configure OSC hardware button port and address (defaults: port 8000, address /button/press)
 ./run.sh --osc-port 8000 --osc-address /button/press
@@ -140,6 +162,7 @@ photobooth-app/
 ├── feature_extractor.py  # Isolates and crops eyes, ears, nose, mouth & face per person
 ├── slot_animator.py      # Slot machine reel timing, deceleration & constellation line
 ├── osc_receiver.py       # Zero-dependency OSC UDP listener for Arduino hardware button
+├── waiting_screen.py     # Standby attractor screen carousel alternating row directions
 ├── collage_generator.py  # Synthesizes chimeric hybrid faces & A4 master collage (1240x1754)
 ├── audio.py              # Synthesized shutter, countdown, and slot machine sound effects
 ├── ui.py                 # UI components (buttons, countdown, flash, toast, face boxes)

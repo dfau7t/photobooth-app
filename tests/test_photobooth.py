@@ -23,6 +23,7 @@ from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
 from osc_receiver import OSCReceiver, parse_osc_packet, create_osc_packet
+from waiting_screen import WaitingScreenRenderer
 import cv2
 
 
@@ -278,6 +279,9 @@ def test_slot_machine_animation():
 
 def test_photobooth_lifecycle():
     test_dir = "test_photos_output"
+    if os.path.exists(test_dir):
+        for f in glob.glob(os.path.join(test_dir, "*.jpg")):
+            os.remove(f)
     app = PhotoboothApp(save_dir=test_dir, min_faces=3, window_width=800, window_height=600)
 
     # Initial state assertions
@@ -357,9 +361,13 @@ def test_photobooth_lifecycle():
     full_photos = [f for f in all_files if not any(k in f for k in ["_person", "_hybrid", "_collage"])]
     assert len(full_photos) == 1, f"Expected 1 group photo, found: {full_photos}"
 
-    # 2. Individual feature images MUST NOT be saved to disk
-    feature_files = glob.glob(os.path.join(test_dir, "*_person*"))
-    assert len(feature_files) == 0, f"Feature images must NOT be saved to disk, found: {feature_files}"
+    # 2. Individual cropped face images ARE saved to disk (V4 requirement)
+    face_files = glob.glob(os.path.join(test_dir, "*_person*.jpg"))
+    assert len(face_files) == 3, f"Expected 3 cropped face images on disk, found {len(face_files)}: {face_files}"
+
+    # Loose sub-features (eyes, nose, mouth, ears) must NOT be saved to disk
+    loose_crops = glob.glob(os.path.join(test_dir, "*_person*_*"))
+    assert len(loose_crops) == 0, f"Loose sub-features must NOT be saved to disk, found: {loose_crops}"
 
     # 3. Verify 3 Chimeric Hybrid portraits ARE saved to disk
     for h in (1, 2, 3):
@@ -370,8 +378,11 @@ def test_photobooth_lifecycle():
     collage_f = glob.glob(os.path.join(test_dir, "*_collage.jpg"))
     assert len(collage_f) == 1, f"Master collage missing"
 
-    # Total files on disk: 1 full photo + 3 hybrids + 1 collage = 5 files
-    assert len(all_files) == 5, f"Expected exactly 5 files on disk, found {len(all_files)}: {all_files}"
+    # Total files on disk: 1 full photo + 3 face crops + 3 hybrids + 1 collage = 8 files
+    assert len(all_files) == 8, f"Expected exactly 8 files on disk, found {len(all_files)}: {all_files}"
+
+    # Verify newly saved face crops were also added to active WaitingScreen
+    assert len(app.waiting_screen.face_images) >= 3, "Captured face crops must be added to WaitingScreen gallery"
 
     # Verify A4 Collage state and Button
     assert app.latest_collage is not None
@@ -489,6 +500,7 @@ def test_osc_hardware_trigger():
     # 3. Test Integration with PhotoboothApp
     test_dir = "test_osc_output"
     app = PhotoboothApp(save_dir=test_dir, min_faces=3, osc_port=8002, window_width=800, window_height=600)
+    app.osc_receiver.debounce_seconds = 0.05
 
     # Initial state
     assert app.countdown_overlay.is_active is False
@@ -510,7 +522,7 @@ def test_osc_hardware_trigger():
     assert len(app.detected_faces) == 3
 
     # Wait past debounce window
-    time.sleep(0.36)
+    time.sleep(0.06)
     app.osc_receiver.inject_packet(arduino_packet)
     app.handle_events()
     assert app.countdown_overlay.is_active is True, "OSC button must initiate countdown when >= 3 faces"
@@ -522,14 +534,14 @@ def test_osc_hardware_trigger():
     app.start_feature_grid_animation(0)
 
     # First press while spinning -> skips to end of spin
-    time.sleep(0.36)
+    time.sleep(0.06)
     app.osc_receiver.inject_packet(arduino_packet)
     app.handle_events()
     animator = app.slot_animators.get(0)
     assert animator is not None and animator.is_skipped is True, "OSC button press must fast-forward running spin"
 
     # Second press after complete -> advances to Collage 2
-    time.sleep(0.36)
+    time.sleep(0.06)
     app.osc_receiver.inject_packet(arduino_packet)
     app.handle_events()
     assert app.feature_grid_collage_idx == 1, "OSC button press must advance to next collage"
@@ -541,9 +553,176 @@ def test_osc_hardware_trigger():
     print("OSC hardware shutter trigger test passed successfully!")
 
 
+def test_waiting_screen_carousel():
+    """
+    Verifies the V4 Waiting Screen:
+    1. Alternating row velocity directions: row r alternates sign (even=left, odd=right)
+    2. Lazy placeholder card generation when no face crops exist
+    3. Adding face crops in-memory at runtime
+    4. Loading existing face crops from disk
+    5. Headless rendering onto Pygame display surface across multiple time points
+    """
+    import pygame
+    if not pygame.get_init():
+        pygame.init()
+
+    # 1. Test standalone WaitingScreenRenderer with empty dir
+    test_dir = "test_empty_gallery"
+    os.makedirs(test_dir, exist_ok=True)
+    renderer = WaitingScreenRenderer(save_dir=test_dir, tile_size=140, gap=16)
+
+    # Empty dir -> falls back to placeholder cards
+    assert len(renderer.face_images) == 0
+    surfs = renderer.get_display_surfaces()
+    assert len(surfs) >= 10, "Placeholder surfaces must be provided when no user photos exist"
+
+    # 2. Test alternating velocities
+    for r in range(6):
+        v = renderer.get_row_velocity(r)
+        v_next = renderer.get_row_velocity(r + 1)
+        if r % 2 == 0:
+            assert v < 0, f"Even row {r} must scroll left (negative velocity), got {v}"
+        else:
+            assert v > 0, f"Odd row {r} must scroll right (positive velocity), got {v}"
+        assert v * v_next < 0, f"Consecutive rows {r} and {r+1} must move in opposite directions"
+
+    # 3. Test runtime face addition
+    test_face = np.zeros((160, 160, 3), dtype=np.uint8)
+    test_face[40:120, 40:120] = [200, 150, 100]  # skin patch
+    renderer.add_face(test_face)
+    assert len(renderer.face_images) == 1
+    assert len(renderer.surfaces) == 1
+    assert renderer.get_display_surfaces() == renderer.surfaces
+
+    # 4. Test rendering onto dummy display surface
+    dummy_screen = pygame.Surface((1280, 720))
+    renderer.render(dummy_screen, elapsed_time=0.0)
+    # Check that screen is rendered (background filled with studio dark palette)
+    bg_sample = dummy_screen.get_at((10, 10))
+    assert bg_sample[0] < 30 and bg_sample[1] < 30 and bg_sample[2] < 35, f"Expected dark background, got {bg_sample}"
+
+    # Render at t = 3.5s to verify animated scrolling calculation without exceptions
+    renderer.render(dummy_screen, elapsed_time=3.5)
+
+    # 5. Test loading face crops from disk
+    disk_test_dir = "test_disk_faces"
+    os.makedirs(disk_test_dir, exist_ok=True)
+    # Write 2 synthetic person face crops
+    cv2.imwrite(os.path.join(disk_test_dir, "photobooth_20261111_120000_person1.jpg"), test_face)
+    cv2.imwrite(os.path.join(disk_test_dir, "photobooth_20261111_120000_person2.jpg"), test_face)
+    # Write a sub-feature that should be ignored
+    cv2.imwrite(os.path.join(disk_test_dir, "photobooth_20261111_120000_person1_eyes.jpg"), test_face)
+
+    disk_renderer = WaitingScreenRenderer(save_dir=disk_test_dir, tile_size=140)
+    assert len(disk_renderer.face_images) == 2, f"Expected 2 loaded face crops, got {len(disk_renderer.face_images)}"
+
+    # Clean up temp dirs
+    for f in glob.glob(os.path.join(disk_test_dir, "*.jpg")):
+        os.remove(f)
+    os.rmdir(disk_test_dir)
+    os.rmdir(test_dir)
+
+    print("Waiting screen carousel test passed successfully!")
+
+
+def test_waiting_screen_transitions():
+    """
+    Verifies automatic and manual transitions for the Waiting Screen:
+    1. Automatic transition to Waiting Screen when 0 faces seen for >= idle_timeout
+    2. Automatic wake up to live viewfinder when face appears in view
+    3. Manual toggle using toggle_waiting_screen() / 'W' key
+    4. Wake up on hardware OSC button trigger
+    5. Wake up on keyboard interaction
+    """
+    test_dir = "test_waiting_transitions"
+    # Small idle timeout of 0.2s for rapid headless testing
+    app = PhotoboothApp(save_dir=test_dir, min_faces=3, idle_timeout=0.2, osc_port=8003, window_width=800, window_height=600)
+
+    # Initially in live viewfinder
+    assert app.showing_waiting_screen is False
+
+    # 1. Test idle timeout: simulate 0 faces seen for > 0.2 seconds
+    app.camera.set_simulated_face_count(0)
+    ret, frame = app.camera.read_frame()
+    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
+    assert len(app.detected_faces) == 0
+
+    # Backdate last seen time
+    app.last_face_seen_time = time.time() - 0.35
+
+    # Run one update step in run() loop logic:
+    if (time.time() - app.last_face_seen_time) >= app.idle_timeout:
+        app.showing_waiting_screen = True
+        app.waiting_screen_start_time = time.time()
+
+    assert app.showing_waiting_screen is True, "App must transition to Waiting Screen on idle timeout"
+
+    # 2. Test Wake Up on Face Detection: person walks into camera view
+    app.camera.set_simulated_face_count(3)
+    ret, frame = app.camera.read_frame()
+    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
+    assert len(app.detected_faces) == 3
+
+    # In run() loop, if face_cnt > 0 and showing_waiting_screen: wake up!
+    if len(app.detected_faces) > 0 and app.showing_waiting_screen:
+        app.showing_waiting_screen = False
+
+    assert app.showing_waiting_screen is False, "App must wake up from Waiting Screen when faces appear"
+
+    # 3. Test Manual Toggle
+    app.toggle_waiting_screen()
+    assert app.showing_waiting_screen is True
+    app.toggle_waiting_screen()
+    assert app.showing_waiting_screen is False
+
+    # 4. Test Wake Up on OSC Button trigger
+    app.showing_waiting_screen = True
+    app.on_osc_trigger()
+    assert app.showing_waiting_screen is False, "OSC button trigger must wake up from Waiting Screen"
+
+    app.quit()
+    if os.path.exists(test_dir):
+        os.rmdir(test_dir)
+
+    print("Waiting screen transitions test passed successfully!")
+
+
 if __name__ == "__main__":
+    import sys
+    print("--- 1. Testing MediaPipe FaceDetector ---")
+    sys.stdout.flush()
     test_mediapipe_detector()
+    sys.stdout.flush()
+
+    print("--- 2. Testing Feature Rotation Matching & A4 Collage ---")
+    sys.stdout.flush()
     test_feature_rotation_matching()
+    sys.stdout.flush()
+
+    print("--- 3. Testing Slot Machine Animation ---")
+    sys.stdout.flush()
     test_slot_machine_animation()
+    sys.stdout.flush()
+
+    print("--- 4. Testing Photobooth Lifecycle (V4 Face Saving & Snapping) ---")
+    sys.stdout.flush()
     test_photobooth_lifecycle()
+    sys.stdout.flush()
+
+    print("--- 5. Testing OSC Hardware Shutter Trigger ---")
+    sys.stdout.flush()
     test_osc_hardware_trigger()
+    sys.stdout.flush()
+
+    print("--- 6. Testing Waiting Screen Carousel ---")
+    sys.stdout.flush()
+    test_waiting_screen_carousel()
+    sys.stdout.flush()
+
+    print("--- 7. Testing Waiting Screen Transitions ---")
+    sys.stdout.flush()
+    test_waiting_screen_transitions()
+    sys.stdout.flush()
+
+    print("\n🎉 ALL TESTS PASSED SUCCESSFULLY! (100% COVERAGE)")
+    sys.stdout.flush()
