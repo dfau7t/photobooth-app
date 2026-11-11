@@ -1,9 +1,9 @@
-# 📸 Photobooth Studio (v3.Alpha)
+# 📸 Photobooth Studio (v3)
 
-A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **3-second countdown timer**, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, and **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation** and **A4-ready print posters**.
+A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **3-second countdown timer**, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, and **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation**, **A4-ready print posters**, and **hardware arcade button trigger via OSC (Arduino Nano ESP32)**.
 
 > [!NOTE]
-> **Release: v3.Alpha** — Introduces Google MediaPipe 7-point facial landmark detection, in-memory leveled feature isolation, dynamic rotation matching to base portraits, ISO A4 poster layout ($1240 \times 1754$ px at 150 DPI), and the animated tactile Slot Machine Feature Breakdown Grid view.
+> **Release: v3** — Complete major release featuring Google MediaPipe 7-point facial landmark detection, in-memory leveled feature isolation, dynamic rotation matching to base portraits, ISO A4 poster layout ($1240 \times 1754$ px at 150 DPI), animated tactile Slot Machine Feature Breakdown Grid with constellation connecting line, and external hardware button shutter triggering via Open Sound Control (OSC 1.0 over UDP).
 
 ---
 
@@ -27,6 +27,7 @@ Photos and collages are automatically saved to [`photos/`](photos/).
 | Action | Keyboard Shortcut | On-Screen Button |
 | :--- | :--- | :--- |
 | **Snap Photo (3s Timer)** | <kbd>SPACE</kbd> or <kbd>RETURN</kbd> *(Active when ≥ 3 faces)* | `SNAP (3s TIMER)` *(Greys out if < 3 faces)* |
+| **External Arcade Button** | **Physical Button** *(Arduino ESP32 OSC)* | Triggers shutter / advances collages |
 | **Slot Machine Animation** | <kbd>SPACE</kbd> skips spinning reel or advances collage; <kbd>R</kbd> replays; <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> selects collage | `NEXT COLLAGE` / `SKIP SPIN` |
 | **Toggle Feature Grid / Camera** | <kbd>V</kbd> *(Or <kbd>ESC</kbd> to return to camera)* | `FEATURE GRID` / `LIVE CAMERA` |
 | **Toggle Fullscreen** | <kbd>F</kbd> | `FULLSCREEN` / `WINDOWED` |
@@ -35,7 +36,7 @@ Photos and collages are automatically saved to [`photos/`](photos/).
 
 ---
 
-## ✨ Features (v3.Alpha)
+## ✨ Features (v3)
 
 ### 1. Facial Feature Extraction with Rotation Alignment
 When 3 faces are detected and the photo is snapped, the system isolates and crops individual facial anatomy in-memory for every person:
@@ -78,6 +79,13 @@ Directly inspired by the Swiss minimalist reference design:
 - Default 3-second animated countdown sequence with audio beeps and screen flash.
 - On-screen snap preview toast continues to display *only* the full group photo cleanly.
 
+### 7. Hardware Shutter Trigger (Arduino Nano ESP32 via OSC)
+- Support for physical arcade buttons and tactile hardware triggers via Open Sound Control (OSC 1.0 over UDP).
+- Built-in zero-dependency UDP listener binds to `0.0.0.0:8000` listening for `/button/press` packets sent by the included Arduino project (`Arduino_Button/OSC_Button/`).
+- Dispatches hardware triggers safely to the main Pygame UI thread with automatic debouncing.
+- In camera mode, pressing the physical button triggers the 3-second countdown (when $\ge 3$ faces are detected).
+- In Feature Breakdown Grid view, pressing the physical button skips the spinning animation or advances to the next collage.
+
 ---
 
 ## ⚙️ Options & Customization
@@ -87,6 +95,12 @@ You can pass command-line arguments to customize your photobooth session:
 ```bash
 # Change the required minimum number of faces (default: 3)
 ./run.sh --min-faces 3
+
+# Configure OSC hardware button port and address (defaults: port 8000, address /button/press)
+./run.sh --osc-port 8000 --osc-address /button/press
+
+# Disable OSC hardware button listener
+./run.sh --no-osc
 
 # Save photos to a custom folder
 ./run.sh --save-dir my_booth_photos
@@ -125,6 +139,7 @@ photobooth-app/
 ├── face_detector.py      # Google MediaPipe FaceDetector with 7-point facial landmarks
 ├── feature_extractor.py  # Isolates and crops eyes, ears, nose, mouth & face per person
 ├── slot_animator.py      # Slot machine reel timing, deceleration & constellation line
+├── osc_receiver.py       # Zero-dependency OSC UDP listener for Arduino hardware button
 ├── collage_generator.py  # Synthesizes chimeric hybrid faces & A4 master collage (1240x1754)
 ├── audio.py              # Synthesized shutter, countdown, and slot machine sound effects
 ├── ui.py                 # UI components (buttons, countdown, flash, toast, face boxes)
@@ -132,6 +147,8 @@ photobooth-app/
 ├── run.sh                # Executable launcher script
 ├── photos/               # Target folder where captured photos & collages are saved
 ├── models/               # MediaPipe BlazeFace short-range TFLite model weights
+├── Arduino_Button/       # PlatformIO firmware for Arduino Nano ESP32 Wi-Fi button
+│   └── OSC_Button/
 ├── AGENTS.md             # Architecture, constraints & developer guide
 ├── requirements.txt      # Python dependencies (mediapipe, opencv-python, pygame, numpy)
 └── tests/

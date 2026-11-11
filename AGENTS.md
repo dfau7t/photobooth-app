@@ -11,7 +11,7 @@ This document provides essential instructions, architectural guidelines, technic
 ### Version History
 - **V1**: Core photobooth lifecycle — camera capture, live mirrored preview, taking a photo, auto-saving to disk (`photos/`), 3-second animated countdown, shutter flash, synthesized audio effects, and face detection.
 - **V2**: Group requirement & UI refinements — require $\ge 3$ detected faces to enable taking a photo; snap button disables and greys out when $< 3$ faces are detected; 3-second timer countdown is the default and only snap mode (instant snap removed); preview toast displays *only* the full image.
-- **V3.Alpha**: Feature extraction, face collages & MediaPipe integration:
+- **V3**: Feature extraction, face collages, MediaPipe integration, slot machine UI & hardware button:
   - Switched face detection model to **Google MediaPipe FaceDetector** (BlazeFace short-range TFLite model at `models/blaze_face_short_range.tflite`) with GPU Metal / CPU XNNPACK acceleration.
   - Extracts 6 facial keypoints (right eye, left eye, nose tip, mouth center, right ear tragion, left ear tragion), deriving mouth corners to produce a standardized 7-landmark geometry.
   - Identifies and extracts facial features (eyes, nose, mouth, ears, and headshot) for all detected people.
@@ -25,6 +25,7 @@ This document provides essential instructions, architectural guidelines, technic
   - **Slot Machine Feature Selection Animation**: Tactile slot machine reel animation selecting features row-by-row (eyes, nose, ears, lips) with ease-out deceleration and reel click sound effects. Once a feature locks in, it is highlighted in soft pastel pink (`#F6CBD9`), accompanied by a lock chime.
   - **Animated Constellation Connecting Line**: After row selections complete, an animated vibrant pink line (`#E44B7D`, 6px) smoothly sweeps through and connects each selected feature node, matching the Swiss minimalist design aesthetic from the reference layout.
   - **Resulting Hybrid Reveal**: Once the connecting line finishes, the chimeric hybrid portrait card and recipe breakdown are displayed with interactive controls (<kbd>SPACE</kbd> next/skip, <kbd>R</kbd> replay, <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> direct jump, <kbd>V</kbd> live camera).
+  - **External Hardware Shutter Trigger via OSC**: Zero-dependency UDP receiver listening for `/button/press` OSC 1.0 messages from an Arduino Nano ESP32 button, debouncing and dispatching safely to the main Pygame UI loop.
 
 ---
 
@@ -64,6 +65,7 @@ git status -s
 | `face_detector.py` | Google MediaPipe `vision.FaceDetector` using `models/blaze_face_short_range.tflite`. Extracts bounding boxes, confidence scores, and 7-point landmarks (`re`, `le`, `nose_tip`, `mouth_right`, `mouth_left`, `right_ear`, `left_ear`). |
 | `feature_extractor.py` | Isolates facial features per person (`eyes`, `right_eye`, `left_eye`, `nose`, `mouth`, `left_ear`, `right_ear`, `ears`, `face`). Features are leveled using `_safe_crop_oriented()`. Returns landmarks, head tilt angle, and crop origins. |
 | `slot_animator.py` | Manages timing, ease-out deceleration, and state transitions for the slot-machine feature selection reel and the sweeping animated connection line. Emits audio event triggers (`tick`, `lock`, `line_start`, `line_complete`). |
+| `osc_receiver.py` | Background UDP socket listener and binary OSC 1.0 parser. Decodes `/button/press` packets from Arduino hardware and dispatches triggers to the main UI thread with debouncing. |
 | `collage_generator.py` | Synthesizes randomized chimeric hybrid portraits with `_overlay_rotated_cutout()` matching base face rotation, scale, and landmark coordinates. Builds the A4 Master Face Collage poster (1240×1754) with the 3 hybrids centered horizontally, and renders the interactive Feature Breakdown Grid view. |
 | `ui.py` | UI components: `Button` (with disabled/greyed-out, hover, and click states), `CountdownOverlay`, `FlashOverlay`, `PreviewToast`, viewfinder guide lines, and `draw_face_box()`. |
 | `audio.py` | Synthesized countdown beeps and camera shutter sounds generated via `pygame.mixer` byte arrays, with graceful degradation when audio devices are inaccessible. |
@@ -151,3 +153,6 @@ PYTHONPATH=. .venv/bin/python3 tests/test_photobooth.py
 | `--min-faces` | `3` | Minimum number of detected faces required to enable snap. |
 | `--no-mirror` | `False` | Disables horizontal mirror flip. |
 | `--fullscreen`| `False` | Starts directly in fullscreen mode. |
+| `--osc-port`  | `8000` | UDP port to listen for Arduino OSC button messages. |
+| `--osc-address` | `"/button/press"` | OSC address pattern that triggers the shutter. |
+| `--no-osc`    | `False` | Disables background OSC UDP receiver. |

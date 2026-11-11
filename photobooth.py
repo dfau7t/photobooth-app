@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Photobooth Application (v3.Alpha)
+Photobooth Application (v3)
 A native desktop photobooth app featuring camera access, live mirrored preview,
 3-face group detection requirement, countdown timer, audio cues, individual facial
 feature extraction (eyes, ears, nose, mouth), and chimeric face collage generation.
@@ -23,6 +23,7 @@ from face_detector import FaceDetector
 from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
+from osc_receiver import OSCReceiver
 from audio import SoundEffects
 import ui
 
@@ -39,6 +40,9 @@ class PhotoboothApp:
         min_faces: int = 3,
         window_width: int = 1100,
         window_height: int = 750,
+        osc_port: int = 8000,
+        osc_address: str = "/button/press",
+        enable_osc: bool = True,
     ):
         self.save_dir = os.path.abspath(save_dir)
         os.makedirs(self.save_dir, exist_ok=True)
@@ -79,6 +83,16 @@ class PhotoboothApp:
 
         # Audio effects
         self.audio = SoundEffects()
+
+        # Hardware Button OSC Receiver (Arduino ESP32 trigger)
+        self.osc_receiver = OSCReceiver(
+            host="0.0.0.0",
+            port=osc_port,
+            address=osc_address,
+            on_button_press=self.on_osc_trigger,
+            enabled=enable_osc,
+        )
+        self.osc_receiver.start()
 
         # Initialize Camera
         self.camera = Camera(
@@ -240,6 +254,11 @@ class PhotoboothApp:
 
         self._rebuild_buttons()
 
+    def on_osc_trigger(self, args=None):
+        """Callback triggered when an OSC message is received from the hardware button."""
+        print(f"[Photobooth] 🔘 Hardware Button Press received via OSC (arg={args}) -> Triggering Shutter")
+        self.start_countdown()
+
     def start_countdown(self):
         if self.showing_feature_grid:
             animator = self.slot_animators.get(self.feature_grid_collage_idx)
@@ -346,8 +365,14 @@ class PhotoboothApp:
 
     def quit(self):
         self.running = False
+        if getattr(self, "osc_receiver", None):
+            self.osc_receiver.stop()
 
     def handle_events(self):
+        # Poll OSC receiver for hardware button triggers on main thread
+        if getattr(self, "osc_receiver", None):
+            self.osc_receiver.poll()
+
         mouse_pos = pygame.mouse.get_pos()
         for b in self.buttons:
             b.update(mouse_pos)
@@ -530,7 +555,8 @@ class PhotoboothApp:
                 else:
                     face_badge = f"⚠️ Need {self.min_faces_required} Faces ({face_cnt}/{self.min_faces_required})"
                     badge_color = ui.ACCENT_AMBER
-                status_text = f"● {mode_badge}   |   {face_badge}   |   {self.photos_taken_count} Snaps"
+                osc_badge = "   |   🎛️ OSC" if getattr(self, "osc_receiver", None) and self.osc_receiver.enabled else ""
+                status_text = f"● {mode_badge}   |   {face_badge}   |   {self.photos_taken_count} Snaps{osc_badge}"
                 status_surf = self.font_btn.render(status_text, True, badge_color)
                 self.screen.blit(status_surf, (sw - status_surf.get_width() - 24, 16))
 
@@ -616,12 +642,14 @@ class PhotoboothApp:
 
         # Cleanup
         self.camera.release()
+        if getattr(self, "osc_receiver", None):
+            self.osc_receiver.stop()
         pygame.quit()
         print("[Photobooth] Closed cleanly.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Photobooth Studio (v3.Alpha)")
+    parser = argparse.ArgumentParser(description="Photobooth Studio (v3)")
     parser.add_argument(
         "--save-dir",
         default="photos",
@@ -661,6 +689,22 @@ def main():
         action="store_true",
         help="Start in fullscreen mode",
     )
+    parser.add_argument(
+        "--osc-port",
+        type=int,
+        default=8000,
+        help="UDP port to listen for Arduino OSC button messages (default: 8000)",
+    )
+    parser.add_argument(
+        "--osc-address",
+        default="/button/press",
+        help="OSC message address pattern to trigger shutter (default: '/button/press')",
+    )
+    parser.add_argument(
+        "--no-osc",
+        action="store_true",
+        help="Disable background OSC UDP receiver",
+    )
 
     args = parser.parse_args()
 
@@ -672,6 +716,9 @@ def main():
         mirror=not args.no_mirror,
         fullscreen=args.fullscreen,
         min_faces=args.min_faces,
+        osc_port=args.osc_port,
+        osc_address=args.osc_address,
+        enable_osc=not args.no_osc,
     )
     app.run()
 

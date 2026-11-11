@@ -22,6 +22,7 @@ from face_detector import FaceDetector
 from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
+from osc_receiver import OSCReceiver, parse_osc_packet, create_osc_packet
 import cv2
 
 
@@ -453,8 +454,96 @@ def test_photobooth_lifecycle():
     print("Photobooth V3 lifecycle test passed successfully!")
 
 
+def test_osc_hardware_trigger():
+    """
+    Verifies that incoming OSC packets from Arduino trigger the shutter countdown:
+    1. Parsing of Arduino's /button/press OSC packet
+    2. OSCReceiver queueing and thread-safe main thread dispatch
+    3. Triggering 3-second countdown when >= 3 faces detected
+    4. Blocking countdown when < 3 faces detected
+    5. Interaction in Feature Grid view (skipping spin or advancing)
+    """
+    # 1. Packet parsing test
+    arduino_packet = create_osc_packet("/button/press", [1])
+    addr, args = parse_osc_packet(arduino_packet)
+    assert addr == "/button/press"
+    assert args == [1]
+
+    # 2. Test OSCReceiver standalone
+    received = []
+    receiver = OSCReceiver(
+        port=8001,
+        address="/button/press",
+        on_button_press=lambda a: received.append(a),
+        enabled=True,
+        debounce_seconds=0.1,
+    )
+    receiver.start()
+    receiver.inject_packet(arduino_packet)
+    assert len(received) == 0, "Callback must defer to poll() on main thread"
+    receiver.poll()
+    assert len(received) == 1
+    assert received[0] == [1]
+    receiver.stop()
+
+    # 3. Test Integration with PhotoboothApp
+    test_dir = "test_osc_output"
+    app = PhotoboothApp(save_dir=test_dir, min_faces=3, osc_port=8002, window_width=800, window_height=600)
+
+    # Initial state
+    assert app.countdown_overlay.is_active is False
+
+    # A) Attempt OSC button press when < 3 faces (1 face detected) -> Countdown must NOT start
+    app.camera.set_simulated_face_count(1)
+    ret, frame = app.camera.read_frame()
+    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
+    assert len(app.detected_faces) == 1
+
+    app.osc_receiver.inject_packet(arduino_packet)
+    app.handle_events()
+    assert app.countdown_overlay.is_active is False, "OSC button must respect 3-face requirement"
+
+    # B) Attempt OSC button press when >= 3 faces (3 faces detected) -> Countdown MUST start!
+    app.camera.set_simulated_face_count(3)
+    ret, frame = app.camera.read_frame()
+    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
+    assert len(app.detected_faces) == 3
+
+    # Wait past debounce window
+    time.sleep(0.36)
+    app.osc_receiver.inject_packet(arduino_packet)
+    app.handle_events()
+    assert app.countdown_overlay.is_active is True, "OSC button must initiate countdown when >= 3 faces"
+    app.countdown_overlay.cancel()
+
+    # C) Test OSC button press in Feature Breakdown Grid (advances / skips animation)
+    app.showing_feature_grid = True
+    app.feature_grid_collage_idx = 0
+    app.start_feature_grid_animation(0)
+
+    # First press while spinning -> skips to end of spin
+    time.sleep(0.36)
+    app.osc_receiver.inject_packet(arduino_packet)
+    app.handle_events()
+    animator = app.slot_animators.get(0)
+    assert animator is not None and animator.is_skipped is True, "OSC button press must fast-forward running spin"
+
+    # Second press after complete -> advances to Collage 2
+    time.sleep(0.36)
+    app.osc_receiver.inject_packet(arduino_packet)
+    app.handle_events()
+    assert app.feature_grid_collage_idx == 1, "OSC button press must advance to next collage"
+
+    app.quit()
+    if os.path.exists(test_dir):
+        os.rmdir(test_dir)
+
+    print("OSC hardware shutter trigger test passed successfully!")
+
+
 if __name__ == "__main__":
     test_mediapipe_detector()
     test_feature_rotation_matching()
     test_slot_machine_animation()
     test_photobooth_lifecycle()
+    test_osc_hardware_trigger()
