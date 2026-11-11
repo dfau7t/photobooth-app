@@ -4,7 +4,7 @@ Photobooth Application (v4)
 A native desktop photobooth app featuring camera access, live mirrored preview,
 3-face group detection requirement, countdown timer, audio cues, individual facial
 feature extraction (eyes, ears, nose, mouth), chimeric face collage generation,
-hardware button OSC trigger, and an attractor waiting screen carousel of all detected faces.
+and an attractor waiting screen carousel of all detected faces.
 """
 
 import os
@@ -24,8 +24,8 @@ from face_detector import FaceDetector
 from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
-from osc_receiver import OSCReceiver
 from waiting_screen import WaitingScreenRenderer
+from gesture_detector import PoseGestureDetector, GestureResult
 from audio import SoundEffects
 import ui
 
@@ -42,13 +42,15 @@ class PhotoboothApp:
         min_faces: int = 3,
         window_width: int = 1100,
         window_height: int = 750,
-        osc_port: int = 8000,
-        osc_address: str = "/button/press",
-        enable_osc: bool = True,
         idle_timeout: float = 15.0,
     ):
         self.save_dir = os.path.abspath(save_dir)
-        os.makedirs(self.save_dir, exist_ok=True)
+        self.full_images_dir = os.path.join(self.save_dir, "full_images")
+        self.cropped_faces_dir = os.path.join(self.save_dir, "cropped_faces")
+        self.collages_dir = os.path.join(self.save_dir, "collages")
+        os.makedirs(self.full_images_dir, exist_ok=True)
+        os.makedirs(self.cropped_faces_dir, exist_ok=True)
+        os.makedirs(self.collages_dir, exist_ok=True)
 
         self.cam_width = cam_width
         self.cam_height = cam_height
@@ -91,16 +93,6 @@ class PhotoboothApp:
         # Audio effects
         self.audio = SoundEffects()
 
-        # Hardware Button OSC Receiver (Arduino ESP32 trigger)
-        self.osc_receiver = OSCReceiver(
-            host="0.0.0.0",
-            port=osc_port,
-            address=osc_address,
-            on_button_press=self.on_osc_trigger,
-            enabled=enable_osc,
-        )
-        self.osc_receiver.start()
-
         # Initialize Camera
         self.camera = Camera(
             camera_index=camera_index,
@@ -109,8 +101,10 @@ class PhotoboothApp:
             mirror=mirror,
         )
 
-        # Face Detector & Feature Extractor & Collage Generator & Waiting Screen
+        # Face Detector, Gesture Detector & Feature Extractor & Collage Generator & Waiting Screen
         self.face_detector = FaceDetector()
+        self.gesture_detector = PoseGestureDetector(min_faces_required=min_faces, hold_duration=0.40)
+        self.latest_gesture_result: Optional[GestureResult] = None
         self.feature_extractor = FeatureExtractor()
         self.collage_generator = CollageGenerator()
         self.waiting_screen = WaitingScreenRenderer(save_dir=self.save_dir)
@@ -149,10 +143,10 @@ class PhotoboothApp:
         btn_y = sh - bar_height + 18
         btn_h = 44
 
-        # Primary action: Snap (defaults to 3s timer countdown)
+        # Primary action: Snap (gesture-triggered or manual SPACE)
         btn_snap = ui.Button(
-            rect=pygame.Rect(0, 0, 200, btn_h),
-            label="SNAP (3s TIMER)",
+            rect=pygame.Rect(0, 0, 220, btn_h),
+            label="SNAP (RAISE HANDS ✋)",
             shortcut="SPACE",
             bg_color=ui.ACCENT_RED,
             hover_color=(250, 90, 90),
@@ -163,7 +157,7 @@ class PhotoboothApp:
         has_features = len(self.latest_people_features) > 0 or self.latest_collage is not None
         grid_label = "LIVE CAMERA" if self.showing_feature_grid else "FEATURE GRID"
         btn_collage = ui.Button(
-            rect=pygame.Rect(0, 0, 175, btn_h),
+            rect=pygame.Rect(0, 0, 180, btn_h),
             label=grid_label,
             shortcut="V",
             bg_color=(40, 150, 75) if self.showing_feature_grid else (ui.ACCENT_BLUE if has_features else (36, 38, 46)),
@@ -172,40 +166,20 @@ class PhotoboothApp:
             on_click=self.toggle_feature_grid,
         )
 
-        # Fullscreen toggle
-        btn_fs_label = "WINDOWED" if self.is_fullscreen else "FULLSCREEN"
-        btn_fs = ui.Button(
-            rect=pygame.Rect(0, 0, 140, btn_h),
-            label=btn_fs_label,
-            shortcut="F",
-            bg_color=ui.SURFACE_DARK,
-            on_click=self.toggle_fullscreen,
-        )
-
-        # Quit
-        btn_quit = ui.Button(
-            rect=pygame.Rect(0, 0, 105, btn_h),
-            label="QUIT",
-            shortcut="ESC",
-            bg_color=ui.SURFACE_DARK,
-            hover_color=(55, 30, 30),
-            on_click=self.quit,
-        )
-
-        all_btns = [btn_snap, btn_collage, btn_fs, btn_quit]
-        total_w = sum(b.rect.width for b in all_btns) + (len(all_btns) - 1) * 16
+        all_btns = [btn_snap, btn_collage]
+        total_w = sum(b.rect.width for b in all_btns) + (len(all_btns) - 1) * 20
         start_x = max(20, (sw - total_w) // 2)
 
         curr_x = start_x
         for b in all_btns:
             b.rect.x = curr_x
             b.rect.y = btn_y
-            curr_x += b.rect.width + 16
+            curr_x += b.rect.width + 20
 
         self.btn_snap = btn_snap
         self.btn_collage = btn_collage
-        self.btn_fs = btn_fs
-        self.btn_quit = btn_quit
+        self.btn_fs = None
+        self.btn_quit = None
         self.buttons = all_btns
 
     @property
@@ -275,14 +249,6 @@ class PhotoboothApp:
             self._rebuild_buttons()
             print("[Photobooth] 👁️ Woke up from Waiting Screen -> Live Viewfinder.")
 
-    def on_osc_trigger(self, args=None):
-        """Callback triggered when an OSC message is received from the hardware button."""
-        print(f"[Photobooth] 🔘 Hardware Button Press received via OSC (arg={args}) -> Triggering Shutter")
-        if self.showing_waiting_screen:
-            self.toggle_waiting_screen()
-            return
-        self.start_countdown()
-
     def start_countdown(self):
         if self.showing_waiting_screen:
             self.toggle_waiting_screen()
@@ -327,16 +293,16 @@ class PhotoboothApp:
         # Generate unique timestamped filename
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_filename = f"photobooth_{timestamp_str}.jpg"
-        file_path = os.path.join(self.save_dir, base_filename)
+        file_path = os.path.join(self.full_images_dir, base_filename)
 
         # Handle rare rapid snaps in same second
         idx = 1
         while os.path.exists(file_path):
             base_filename = f"photobooth_{timestamp_str}_{idx}.jpg"
-            file_path = os.path.join(self.save_dir, base_filename)
+            file_path = os.path.join(self.full_images_dir, base_filename)
             idx += 1
 
-        # 1. Save Full Photo
+        # 1. Save Full Photo in full_images/
         saved = self.camera.save_frame(frame, file_path)
         if not saved:
             print(f"[Photobooth] Error: Could not write photo to {file_path}")
@@ -363,27 +329,27 @@ class PhotoboothApp:
                 feats = self.feature_extractor.extract_features(frame, face_info)
                 people_features.append(feats)
 
-                # Save individual cropped face image to disk (V4 requirement)
-                face_crop_path = os.path.join(self.save_dir, f"{name_root}_person{p_num}{ext}")
+                # Save individual cropped face image to disk in cropped_faces/
+                face_crop_path = os.path.join(self.cropped_faces_dir, f"{name_root}_person{p_num}{ext}")
                 self.camera.save_frame(feats["face"], face_crop_path)
-                print(f"   ├── Person #{p_num}: saved face crop to {os.path.basename(face_crop_path)}")
+                print(f"   ├── Person #{p_num}: saved face crop to {face_crop_path}")
 
                 # Add newly captured face to the waiting screen gallery
                 self.waiting_screen.add_face(feats["face"])
 
-            # 3. Generate Master Face Collage formatted for A4 Sheet (1240 x 1754)
+            # 3. Generate Master Face Collage formatted for A4 Sheet (1240 x 1754) in collages/
             collage_img = self.collage_generator.generate_collage(people_features, timestamp_str)
-            collage_path = os.path.join(self.save_dir, f"{name_root}_collage{ext}")
+            collage_path = os.path.join(self.collages_dir, f"{name_root}_collage{ext}")
             if self.camera.save_frame(collage_img, collage_path):
                 self.latest_collage = collage_img
                 print(f"[Photobooth] 🎨 Master Face Collage saved to: {collage_path}")
 
-            # 4. Save 3 Randomized Chimeric Hybrid Portraits (matching the Master Poster)
+            # 4. Save 3 Randomized Chimeric Hybrid Portraits in collages/
             hybrids_to_save = getattr(self.collage_generator, "last_hybrids", [])
             for h_idx, hybrid in enumerate(hybrids_to_save):
-                h_path = os.path.join(self.save_dir, f"{name_root}_hybrid{h_idx + 1}{ext}")
+                h_path = os.path.join(self.collages_dir, f"{name_root}_hybrid{h_idx + 1}{ext}")
                 self.camera.save_frame(hybrid, h_path)
-                print(f"   ├── Saved Hybrid #{h_idx + 1} to: {os.path.basename(h_path)}")
+                print(f"   ├── Saved Hybrid #{h_idx + 1} to: {h_path}")
 
             self.latest_people_features = people_features
             self.latest_timestamp_str = timestamp_str
@@ -402,16 +368,12 @@ class PhotoboothApp:
         self.running = False
         if getattr(self, "face_detector", None):
             self.face_detector.close()
+        if getattr(self, "gesture_detector", None):
+            self.gesture_detector.close()
         if getattr(self, "camera", None):
             self.camera.release()
-        if getattr(self, "osc_receiver", None):
-            self.osc_receiver.stop()
 
     def handle_events(self):
-        # Poll OSC receiver for hardware button triggers on main thread
-        if getattr(self, "osc_receiver", None):
-            self.osc_receiver.poll()
-
         mouse_pos = pygame.mouse.get_pos()
         for b in self.buttons:
             b.update(mouse_pos)
@@ -461,6 +423,11 @@ class PhotoboothApp:
                     cnt = int(event.unicode)
                     self.camera.set_simulated_face_count(cnt)
                     print(f"[Photobooth Demo] Switched simulated faces to: {cnt}")
+                elif self.camera.is_simulated and not self.showing_feature_grid and event.key == pygame.K_h:
+                    curr_h = self.camera.get_simulated_hands_up_count()
+                    nxt_h = 0 if curr_h >= 3 else (curr_h + 1 if curr_h > 0 else 3)
+                    self.camera.set_simulated_hands_up_count(nxt_h)
+                    print(f"[Photobooth Demo] Toggled simulated hands up: {nxt_h}/3 participants with both hands up")
                 elif event.key == pygame.K_v:
                     self.toggle_feature_grid()
                 elif event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_c):
@@ -520,14 +487,31 @@ class PhotoboothApp:
             # Read latest camera frame
             success, frame = self.camera.read_frame()
             sw, sh = self.screen.get_size()
+            dt = self.clock.get_time() / 1000.0
 
-            # Live face detection
+            # Live face detection & gesture pose tracking
+            rgb_frame = None
             if success and frame is not None:
                 sim_boxes = self.camera.get_simulated_face_boxes()
                 self.detected_faces = self.face_detector.detect_faces(frame, fallback_boxes=sim_boxes)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             face_cnt = len(self.detected_faces)
             can_snap = (face_cnt >= self.min_faces_required)
+
+            # Update gesture & pose trigger when in active camera view
+            if not self.showing_feature_grid and not self.showing_waiting_screen and not self.countdown_overlay.is_active:
+                if rgb_frame is not None:
+                    fallback_ready = self.camera.get_simulated_hands_up_count() if self.camera.is_simulated else None
+                    self.latest_gesture_result = self.gesture_detector.update(
+                        rgb_frame,
+                        self.detected_faces,
+                        dt=dt,
+                        fallback_ready_count=fallback_ready,
+                    )
+                    if self.latest_gesture_result and self.latest_gesture_result.is_triggered:
+                        print(f"[Photobooth] 🙌 Group Gesture Triggered: All {face_cnt} participants have BOTH hands up with open palms!")
+                        self.start_countdown()
 
             # Idle timeout management: transition to Waiting Screen if no faces are seen
             if face_cnt > 0:
@@ -567,11 +551,16 @@ class PhotoboothApp:
                 self.btn_snap.bg_color = ui.ACCENT_RED
             else:
                 self.btn_snap.enabled = can_snap
-                self.btn_snap.bg_color = ui.ACCENT_RED if can_snap else (50, 52, 60)
-                if can_snap:
-                    self.btn_snap.label = "SNAP"
-                else:
+                if not can_snap:
                     self.btn_snap.label = f"SNAP ({face_cnt}/{self.min_faces_required} FACES)"
+                    self.btn_snap.bg_color = (50, 52, 60)
+                elif self.latest_gesture_result and self.latest_gesture_result.all_ready:
+                    self.btn_snap.label = "READY! (HOLD STEADY...)"
+                    self.btn_snap.bg_color = (40, 180, 80)
+                else:
+                    ready_c = self.latest_gesture_result.ready_count if self.latest_gesture_result else 0
+                    self.btn_snap.label = f"RAISE BOTH HANDS 🙌 ({ready_c}/{face_cnt})"
+                    self.btn_snap.bg_color = ui.ACCENT_RED
 
             # Render Center View: Waiting Screen OR Feature Grid View OR Live Camera Feed
             if self.showing_waiting_screen:
@@ -627,8 +616,7 @@ class PhotoboothApp:
                 else:
                     face_badge = f"⚠️ Need {self.min_faces_required} Faces ({face_cnt}/{self.min_faces_required})"
                     badge_color = ui.ACCENT_AMBER
-                osc_badge = "   |   🎛️ OSC" if getattr(self, "osc_receiver", None) and self.osc_receiver.enabled else ""
-                status_text = f"● {mode_badge}   |   {face_badge}   |   {self.photos_taken_count} Snaps{osc_badge}"
+                status_text = f"● {mode_badge}   |   {face_badge}   |   {self.photos_taken_count} Snaps"
                 status_surf = self.font_btn.render(status_text, True, badge_color)
                 self.screen.blit(status_surf, (sw - status_surf.get_width() - 24, 16))
 
@@ -674,27 +662,19 @@ class PhotoboothApp:
                             confidence=face_info.get("confidence", 1.0),
                         )
 
-                    # If less than 3 faces detected, draw instruction pill on viewfinder
-                    if not can_snap:
-                        alert_elapsed = time.time() - self.face_alert_time
-                        is_alerting = (alert_elapsed < 1.8)
-                        pill_w = 440
-                        pill_h = 36
-                        pill_x = cam_x + (draw_w - pill_w) // 2
-                        pill_y = cam_y + draw_h - pill_h - 16
-                        pill_surf = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
-                        bg_col = (180, 45, 45, 215) if is_alerting else (26, 28, 36, 205)
-                        pygame.draw.rect(pill_surf, bg_col, (0, 0, pill_w, pill_h), border_radius=18)
-                        border_col = (255, 90, 90) if is_alerting else (90, 95, 110)
-                        pygame.draw.rect(pill_surf, border_col, (0, 0, pill_w, pill_h), width=1, border_radius=18)
-
-                        warn_msg = f"👥 GROUP MODE: 3 faces required to snap ({face_cnt}/{self.min_faces_required} detected)"
-                        msg_surf = self.font_hint.render(warn_msg, True, (245, 245, 250))
-                        pill_surf.blit(
-                            msg_surf,
-                            (pill_w // 2 - msg_surf.get_width() // 2, pill_h // 2 - msg_surf.get_height() // 2),
+                    # Draw Hands & Group Gesture Feedback on Viewfinder
+                    if self.latest_gesture_result is not None:
+                        self.gesture_detector.draw_feedback(
+                            screen=self.screen,
+                            view_rect=view_rect,
+                            scale=scale,
+                            cam_x=cam_x,
+                            cam_y=cam_y,
+                            detected_faces=self.detected_faces,
+                            result=self.latest_gesture_result,
+                            font_pill=self.font_btn,
+                            font_badge=self.font_hint,
                         )
-                        self.screen.blit(pill_surf, (pill_x, pill_y))
 
             if not self.showing_waiting_screen:
                 # Bottom Control Bar
@@ -717,8 +697,6 @@ class PhotoboothApp:
 
         # Cleanup
         self.camera.release()
-        if getattr(self, "osc_receiver", None):
-            self.osc_receiver.stop()
         pygame.quit()
         print("[Photobooth] Closed cleanly.")
 
@@ -770,22 +748,6 @@ def main():
         default=15.0,
         help="Seconds of inactivity before entering Waiting Screen (default: 15.0)",
     )
-    parser.add_argument(
-        "--osc-port",
-        type=int,
-        default=8000,
-        help="UDP port to listen for Arduino OSC button messages (default: 8000)",
-    )
-    parser.add_argument(
-        "--osc-address",
-        default="/button/press",
-        help="OSC message address pattern to trigger shutter (default: '/button/press')",
-    )
-    parser.add_argument(
-        "--no-osc",
-        action="store_true",
-        help="Disable background OSC UDP receiver",
-    )
 
     args = parser.parse_args()
 
@@ -798,9 +760,6 @@ def main():
         fullscreen=args.fullscreen,
         min_faces=args.min_faces,
         idle_timeout=args.idle_timeout,
-        osc_port=args.osc_port,
-        osc_address=args.osc_address,
-        enable_osc=not args.no_osc,
     )
     app.run()
 

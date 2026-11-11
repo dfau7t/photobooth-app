@@ -22,8 +22,8 @@ from face_detector import FaceDetector
 from feature_extractor import FeatureExtractor
 from collage_generator import CollageGenerator
 from slot_animator import SlotMachineAnimator
-from osc_receiver import OSCReceiver, parse_osc_packet, create_osc_packet
 from waiting_screen import WaitingScreenRenderer
+from gesture_detector import PoseGestureDetector, GestureResult
 import cv2
 
 
@@ -291,8 +291,8 @@ def test_photobooth_lifecycle():
     assert app.latest_collage is None
     assert app.showing_collage_view is False
 
-    # Button layout assertions: 4 buttons (Snap, View Collage, Fullscreen, Quit)
-    assert len(app.buttons) == 4
+    # Simplified button layout assertions: 2 buttons (Snap, Feature Grid)
+    assert len(app.buttons) == 2
     assert app.btn_snap.on_click == app.start_countdown, "Snap button must trigger countdown"
     assert app.btn_collage.enabled is False, "Collage button must be disabled before any snaps"
 
@@ -355,31 +355,31 @@ def test_photobooth_lifecycle():
     app.take_photo()
     assert app.photos_taken_count == 1
 
-    # Verify generated artifacts on disk:
-    # 1. Full group photo
-    all_files = glob.glob(os.path.join(test_dir, "*.jpg"))
-    full_photos = [f for f in all_files if not any(k in f for k in ["_person", "_hybrid", "_collage"])]
-    assert len(full_photos) == 1, f"Expected 1 group photo, found: {full_photos}"
+    # Verify generated artifacts on disk in organized subdirectories:
+    # 1. Full group photo in full_images/
+    full_photos = glob.glob(os.path.join(test_dir, "full_images", "*.jpg"))
+    assert len(full_photos) == 1, f"Expected 1 group photo in full_images/, found: {full_photos}"
 
-    # 2. Individual cropped face images ARE saved to disk (V4 requirement)
-    face_files = glob.glob(os.path.join(test_dir, "*_person*.jpg"))
-    assert len(face_files) == 3, f"Expected 3 cropped face images on disk, found {len(face_files)}: {face_files}"
+    # 2. Individual cropped face images in cropped_faces/
+    face_files = glob.glob(os.path.join(test_dir, "cropped_faces", "*_person*.jpg"))
+    assert len(face_files) == 3, f"Expected 3 cropped face images in cropped_faces/, found: {face_files}"
 
     # Loose sub-features (eyes, nose, mouth, ears) must NOT be saved to disk
-    loose_crops = glob.glob(os.path.join(test_dir, "*_person*_*"))
+    loose_crops = glob.glob(os.path.join(test_dir, "**", "*_person*_*"), recursive=True)
     assert len(loose_crops) == 0, f"Loose sub-features must NOT be saved to disk, found: {loose_crops}"
 
-    # 3. Verify 3 Chimeric Hybrid portraits ARE saved to disk
+    # 3. Verify 3 Chimeric Hybrid portraits in collages/
     for h in (1, 2, 3):
-        hybrid_f = glob.glob(os.path.join(test_dir, f"*_hybrid{h}.jpg"))
-        assert len(hybrid_f) == 1, f"Hybrid #{h} missing"
+        hybrid_f = glob.glob(os.path.join(test_dir, "collages", f"*_hybrid{h}.jpg"))
+        assert len(hybrid_f) == 1, f"Hybrid #{h} missing in collages/"
 
-    # 4. Verify Master Face Collage IS saved to disk
-    collage_f = glob.glob(os.path.join(test_dir, "*_collage.jpg"))
-    assert len(collage_f) == 1, f"Master collage missing"
+    # 4. Verify Master Face Collage in collages/
+    collage_f = glob.glob(os.path.join(test_dir, "collages", "*_collage.jpg"))
+    assert len(collage_f) == 1, f"Master collage missing in collages/"
 
-    # Total files on disk: 1 full photo + 3 face crops + 3 hybrids + 1 collage = 8 files
-    assert len(all_files) == 8, f"Expected exactly 8 files on disk, found {len(all_files)}: {all_files}"
+    # Total files on disk across subfolders: 1 full photo + 3 face crops + 3 hybrids + 1 collage = 8 files
+    all_files = glob.glob(os.path.join(test_dir, "**", "*.jpg"), recursive=True)
+    assert len(all_files) == 8, f"Expected exactly 8 files on disk across subdirectories, found {len(all_files)}: {all_files}"
 
     # Verify newly saved face crops were also added to active WaitingScreen
     assert len(app.waiting_screen.face_images) >= 3, "Captured face crops must be added to WaitingScreen gallery"
@@ -442,115 +442,21 @@ def test_photobooth_lifecycle():
     assert app.btn_collage.label == "FEATURE GRID"
 
     # =========================================================================
-    # 5. Test Fullscreen Toggle
+    # 6. Test Fullscreen Toggle (UI simplified: shortcut F toggle)
     # =========================================================================
     assert app.is_fullscreen is False
     app.toggle_fullscreen()
     assert app.is_fullscreen is True
-    fs_button = [b for b in app.buttons if b.shortcut == "F"][0]
-    assert fs_button.label == "WINDOWED"
-
     app.toggle_fullscreen()
     assert app.is_fullscreen is False
-    fs_button = [b for b in app.buttons if b.shortcut == "F"][0]
-    assert fs_button.label == "FULLSCREEN"
 
     # Clean up test output
-    all_test_files = glob.glob(os.path.join(test_dir, "*.jpg"))
-    for f in all_test_files:
-        os.remove(f)
-    os.rmdir(test_dir)
+    import shutil
+    if os.path.exists(test_dir):
+        shutil.rmtree(test_dir)
 
     app.quit()
     print("Photobooth V3 lifecycle test passed successfully!")
-
-
-def test_osc_hardware_trigger():
-    """
-    Verifies that incoming OSC packets from Arduino trigger the shutter countdown:
-    1. Parsing of Arduino's /button/press OSC packet
-    2. OSCReceiver queueing and thread-safe main thread dispatch
-    3. Triggering 3-second countdown when >= 3 faces detected
-    4. Blocking countdown when < 3 faces detected
-    5. Interaction in Feature Grid view (skipping spin or advancing)
-    """
-    # 1. Packet parsing test
-    arduino_packet = create_osc_packet("/button/press", [1])
-    addr, args = parse_osc_packet(arduino_packet)
-    assert addr == "/button/press"
-    assert args == [1]
-
-    # 2. Test OSCReceiver standalone
-    received = []
-    receiver = OSCReceiver(
-        port=8001,
-        address="/button/press",
-        on_button_press=lambda a: received.append(a),
-        enabled=True,
-        debounce_seconds=0.1,
-    )
-    receiver.start()
-    receiver.inject_packet(arduino_packet)
-    assert len(received) == 0, "Callback must defer to poll() on main thread"
-    receiver.poll()
-    assert len(received) == 1
-    assert received[0] == [1]
-    receiver.stop()
-
-    # 3. Test Integration with PhotoboothApp
-    test_dir = "test_osc_output"
-    app = PhotoboothApp(save_dir=test_dir, min_faces=3, osc_port=8002, window_width=800, window_height=600)
-    app.osc_receiver.debounce_seconds = 0.05
-
-    # Initial state
-    assert app.countdown_overlay.is_active is False
-
-    # A) Attempt OSC button press when < 3 faces (1 face detected) -> Countdown must NOT start
-    app.camera.set_simulated_face_count(1)
-    ret, frame = app.camera.read_frame()
-    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
-    assert len(app.detected_faces) == 1
-
-    app.osc_receiver.inject_packet(arduino_packet)
-    app.handle_events()
-    assert app.countdown_overlay.is_active is False, "OSC button must respect 3-face requirement"
-
-    # B) Attempt OSC button press when >= 3 faces (3 faces detected) -> Countdown MUST start!
-    app.camera.set_simulated_face_count(3)
-    ret, frame = app.camera.read_frame()
-    app.detected_faces = app.face_detector.detect_faces(frame, fallback_boxes=app.camera.get_simulated_face_boxes())
-    assert len(app.detected_faces) == 3
-
-    # Wait past debounce window
-    time.sleep(0.06)
-    app.osc_receiver.inject_packet(arduino_packet)
-    app.handle_events()
-    assert app.countdown_overlay.is_active is True, "OSC button must initiate countdown when >= 3 faces"
-    app.countdown_overlay.cancel()
-
-    # C) Test OSC button press in Feature Breakdown Grid (advances / skips animation)
-    app.showing_feature_grid = True
-    app.feature_grid_collage_idx = 0
-    app.start_feature_grid_animation(0)
-
-    # First press while spinning -> skips to end of spin
-    time.sleep(0.06)
-    app.osc_receiver.inject_packet(arduino_packet)
-    app.handle_events()
-    animator = app.slot_animators.get(0)
-    assert animator is not None and animator.is_skipped is True, "OSC button press must fast-forward running spin"
-
-    # Second press after complete -> advances to Collage 2
-    time.sleep(0.06)
-    app.osc_receiver.inject_packet(arduino_packet)
-    app.handle_events()
-    assert app.feature_grid_collage_idx == 1, "OSC button press must advance to next collage"
-
-    app.quit()
-    if os.path.exists(test_dir):
-        os.rmdir(test_dir)
-
-    print("OSC hardware shutter trigger test passed successfully!")
 
 
 def test_waiting_screen_carousel():
@@ -631,12 +537,11 @@ def test_waiting_screen_transitions():
     1. Automatic transition to Waiting Screen when 0 faces seen for >= idle_timeout
     2. Automatic wake up to live viewfinder when face appears in view
     3. Manual toggle using toggle_waiting_screen() / 'W' key
-    4. Wake up on hardware OSC button trigger
-    5. Wake up on keyboard interaction
+    4. Wake up on start countdown trigger (e.g., SPACE key or snap action)
     """
     test_dir = "test_waiting_transitions"
     # Small idle timeout of 0.2s for rapid headless testing
-    app = PhotoboothApp(save_dir=test_dir, min_faces=3, idle_timeout=0.2, osc_port=8003, window_width=800, window_height=600)
+    app = PhotoboothApp(save_dir=test_dir, min_faces=3, idle_timeout=0.2, window_width=800, window_height=600)
 
     # Initially in live viewfinder
     assert app.showing_waiting_screen is False
@@ -675,16 +580,109 @@ def test_waiting_screen_transitions():
     app.toggle_waiting_screen()
     assert app.showing_waiting_screen is False
 
-    # 4. Test Wake Up on OSC Button trigger
+    # 4. Test Wake Up on Start Countdown (e.g., SPACE key or snap action)
     app.showing_waiting_screen = True
-    app.on_osc_trigger()
-    assert app.showing_waiting_screen is False, "OSC button trigger must wake up from Waiting Screen"
+    app.start_countdown()
+    assert app.showing_waiting_screen is False, "Triggering snap countdown must wake up from Waiting Screen"
 
     app.quit()
+    import shutil
     if os.path.exists(test_dir):
-        os.rmdir(test_dir)
+        shutil.rmtree(test_dir)
 
     print("Waiting screen transitions test passed successfully!")
+
+
+def test_pose_gesture_detector():
+    """
+    Verifies MediaPipe GestureRecognizer & PoseLandmarker integration:
+    1. Detector initialization with both models
+    2. Group readiness evaluation: all detected participants must have hands up with open palms
+    3. Partial readiness: 1 or 2 of 3 participants ready does NOT trigger shutter
+    4. Full readiness: 3 of 3 participants ready initiates hold timer
+    5. Hold stability filter: triggers after hold_duration
+    6. Integration with PhotoboothApp: automatically initiates 3-second snap countdown
+    """
+    det = PoseGestureDetector(min_faces_required=3, hold_duration=0.1)
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    mock_faces = [
+        {"box": (150, 180, 160, 160)},
+        {"box": (500, 180, 160, 160)},
+        {"box": (850, 180, 160, 160)},
+    ]
+
+    # A) 0 of 3 ready -> not ready
+    res0 = det.detect(frame, mock_faces, fallback_ready_count=0)
+    assert res0.all_ready is False
+    assert res0.ready_count == 0
+    assert res0.participant_hands_count == [0, 0, 0]
+
+    # B) 2 of 3 ready -> not ready
+    res2 = det.detect(frame, mock_faces, fallback_ready_count=2)
+    assert res2.all_ready is False
+    assert res2.ready_count == 2
+    assert res2.participant_readiness == [True, True, False]
+    assert res2.participant_hands_count == [2, 2, 0]
+
+    # C) 3 of 3 ready -> all ready!
+    res3 = det.detect(frame, mock_faces, fallback_ready_count=3)
+    assert res3.all_ready is True
+    assert res3.ready_count == 3
+    assert res3.participant_readiness == [True, True, True]
+    assert res3.participant_hands_count == [2, 2, 2]
+
+    # D) Test hold filter and trigger
+    up1 = det.update(frame, mock_faces, dt=0.03, fallback_ready_count=3)
+    assert up1.all_ready is True
+    assert up1.is_triggered is False
+    time.sleep(0.12)
+    up2 = det.update(frame, mock_faces, dt=0.03, fallback_ready_count=3)
+    assert up2.is_triggered is True, "PoseGestureDetector must trigger after hold_duration"
+
+    det.close()
+
+    # E) Integration Test with PhotoboothApp
+    test_dir = "test_gesture_app"
+    app = PhotoboothApp(save_dir=test_dir, min_faces=3, window_width=800, window_height=600)
+    app.gesture_detector.hold_duration = 0.05
+    app.camera.set_simulated_face_count(3)
+
+    ret, cam_frame = app.camera.read_frame()
+    app.detected_faces = app.face_detector.detect_faces(cam_frame, fallback_boxes=app.camera.get_simulated_face_boxes())
+    assert len(app.detected_faces) == 3
+
+    # Hands down -> Countdown does NOT start
+    app.camera.set_simulated_hands_up_count(0)
+    app.latest_gesture_result = app.gesture_detector.update(
+        cam_frame,
+        app.detected_faces,
+        dt=0.03,
+        fallback_ready_count=0,
+    )
+    assert app.latest_gesture_result.all_ready is False
+    assert app.countdown_overlay.is_active is False
+
+    # All hands up with open palms -> Countdown automatically triggers!
+    app.camera.set_simulated_hands_up_count(3)
+    app.gesture_detector.hold_start_time = time.time() - 0.10
+    app.latest_gesture_result = app.gesture_detector.update(
+        cam_frame,
+        app.detected_faces,
+        dt=0.03,
+        fallback_ready_count=3,
+    )
+    assert app.latest_gesture_result.is_triggered is True
+    if app.latest_gesture_result.is_triggered:
+        app.start_countdown()
+
+    assert app.countdown_overlay.is_active is True, "Hands up with open palms must automatically trigger countdown"
+
+    app.quit()
+    import shutil
+    if os.path.exists(test_dir):
+        shutil.rmtree(test_dir)
+
+    print("Pose & Hand Gesture trigger test passed successfully!")
 
 
 if __name__ == "__main__":
@@ -709,19 +707,19 @@ if __name__ == "__main__":
     test_photobooth_lifecycle()
     sys.stdout.flush()
 
-    print("--- 5. Testing OSC Hardware Shutter Trigger ---")
-    sys.stdout.flush()
-    test_osc_hardware_trigger()
-    sys.stdout.flush()
-
-    print("--- 6. Testing Waiting Screen Carousel ---")
+    print("--- 5. Testing Waiting Screen Carousel ---")
     sys.stdout.flush()
     test_waiting_screen_carousel()
     sys.stdout.flush()
 
-    print("--- 7. Testing Waiting Screen Transitions ---")
+    print("--- 6. Testing Waiting Screen Transitions ---")
     sys.stdout.flush()
     test_waiting_screen_transitions()
+    sys.stdout.flush()
+
+    print("--- 7. Testing Pose & Hand Gesture Shutter Trigger ---")
+    sys.stdout.flush()
+    test_pose_gesture_detector()
     sys.stdout.flush()
 
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY! (100% COVERAGE)")

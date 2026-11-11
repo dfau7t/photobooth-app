@@ -148,9 +148,21 @@ class WaitingScreenRenderer:
 
         # Look for pattern photobooth_*_person*.jpg or photobooth_*_face*.jpg
         # Exclude hybrids, collages, or sub-features (eyes, nose, mouth, ears)
-        all_jpgs = glob.glob(os.path.join(save_dir, "*.jpg"))
+        candidate_dirs = [
+            os.path.join(save_dir, "cropped_faces"),
+            save_dir,
+        ]
+        all_jpgs = []
+        for d in candidate_dirs:
+            if os.path.isdir(d):
+                all_jpgs.extend(glob.glob(os.path.join(d, "*.jpg")))
+
         face_files = []
+        seen_paths = set()
         for p in all_jpgs:
+            if p in seen_paths:
+                continue
+            seen_paths.add(p)
             base = os.path.basename(p)
             # Must contain _person or _face
             if "_person" in base or "_face" in base:
@@ -322,7 +334,7 @@ class WaitingScreenRenderer:
         # Action Prompt with pulsing arrow
         if self.font_hint:
             prompt_alpha = int(180 + pulse * 75)
-            prompt_text = "Press the big button or step into view to begin  ●"
+            prompt_text = "Step into view to begin  ●"
             prompt_surf = self.font_hint.render(prompt_text, True, (200, 205, 220))
             card_surf.blit(prompt_surf, (card_w // 2 - prompt_surf.get_width() // 2, 178))
 

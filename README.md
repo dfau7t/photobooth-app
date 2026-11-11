@@ -1,9 +1,9 @@
-# 📸 Photobooth Studio (v4)
+# 📸 Photobooth Studio (v5)
 
-A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **3-second countdown timer**, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation**, **A4-ready print posters**, **hardware arcade button trigger via OSC (Arduino Nano ESP32)**, and an **animated multi-row waiting attractor screen carousel** with persistent face crop archiving.
+A native desktop photobooth application built with Python, OpenCV, MediaPipe, and Pygame. Features live camera preview, a **3-face group requirement**, a **hands-up open-palm gesture shutter trigger** powered by MediaPipe Gesture Recognizer & Pose Landmarker, **in-memory facial feature extraction (eyes, ears, nose, and mouth)** for each person, **dynamic feature rotation & scale matching**, **chimeric face collage generation** featuring an interactive **Swiss-minimalist slot machine selection animation**, **A4-ready print posters**, an **animated multi-row waiting attractor screen carousel**, and **organized photo folder archiving**.
 
 > [!NOTE]
-> **Release: v4** — Major release introducing the **Waiting / Attractor Screen** with an infinite multi-row horizontal carousel of all detected face crops alternating in scroll direction, automatic idle transition when 0 faces are seen for 15s (`--idle-timeout`), immediate interactive wake-up, and restored **individual face crop disk persistence** (`_person1.jpg`, `_person2.jpg`, etc.) for gallery archiving across sessions while maintaining a clean, uncluttered UI preview.
+> **Release: v5** — Introducing the **Hands-Up with Open Palms Shutter Trigger** using MediaPipe's `GestureRecognizer` and `PoseLandmarker` tasks, **simplified distraction-free UI**, and **organized subdirectories** in the `photos/` folder (`full_images/`, `cropped_faces/`, `collages/`).
 
 ---
 
@@ -18,27 +18,57 @@ Run the launcher script:
 
 *(Or manually: `.venv/bin/python3 photobooth.py`)*
 
-Photos and collages are automatically saved to [`photos/`](photos/).
+Photos and collages are automatically saved in organized folders in [`photos/`](photos/).
 
 ---
 
 ## 🎮 Controls
 
-| Action | Keyboard Shortcut | On-Screen Button |
+| Action | Trigger / Keyboard Shortcut | On-Screen Button |
 | :--- | :--- | :--- |
-| **Snap Photo (3s Timer)** | <kbd>SPACE</kbd> or <kbd>RETURN</kbd> *(Active when ≥ 3 faces)* | `SNAP (3s TIMER)` *(Greys out if < 3 faces)* |
-| **External Arcade Button** | **Physical Button** *(Arduino ESP32 OSC)* | Triggers shutter / advances collages |
+| **Snap Photo (Primary)** | **Raise Hands with Open Palms** *(All participants)* | `SNAP (RAISE HANDS ✋)` *(Active when ≥ 3 faces)* |
+| **Manual Snap Override** | <kbd>SPACE</kbd> or <kbd>RETURN</kbd> | Click `SNAP` button |
 | **Slot Machine Animation** | <kbd>SPACE</kbd> skips spinning reel or advances collage; <kbd>R</kbd> replays; <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> selects collage | `NEXT COLLAGE` / `SKIP SPIN` |
 | **Toggle Feature Grid / Camera** | <kbd>V</kbd> *(Or <kbd>ESC</kbd> to return to camera)* | `FEATURE GRID` / `LIVE CAMERA` |
 | **Toggle Waiting Screen** | <kbd>W</kbd> *(Or auto-activates after 15s idle)* | Standby Attractor Screen |
-| **Wake Up from Waiting** | Step into view, press physical button, <kbd>SPACE</kbd>, or tap screen | Resumes live camera viewfinder |
-| **Toggle Fullscreen** | <kbd>F</kbd> | `FULLSCREEN` / `WINDOWED` |
-| **Demo Face Count** | <kbd>0</kbd>, <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd> *(Demo Mode only)* | Changes simulated face count |
-| **Quit** | <kbd>Q</kbd> or <kbd>ESC</kbd> *(in camera mode)* | `QUIT` |
+| **Wake Up from Waiting** | Step into view, press <kbd>SPACE</kbd>, or tap screen | Resumes live camera viewfinder |
+| **Toggle Fullscreen** | <kbd>F</kbd> | *(Keyboard shortcut)* |
+| **Demo Controls** | <kbd>0</kbd>, <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd> (face count) \| <kbd>H</kbd> (toggle hands up) | Demo / Simulation Mode |
+| **Quit** | <kbd>Q</kbd> or <kbd>ESC</kbd> *(in camera mode)* | *(Keyboard shortcut)* |
 
 ---
 
-## ✨ Features (v4)
+## ✨ Features (v5)
+
+### 1. Both Hands Up with Open Palms Shutter Trigger (MediaPipe Gesture & Pose)
+- Touchless, intuitive group trigger condition: all participants must simultaneously raise **both** hands with open palms facing the camera.
+- **Dual-Model Coordination**:
+  - **MediaPipe PoseLandmarker** (`models/pose_landmarker_lite.task`): Tracks shoulder, elbow, and wrist joints to verify that each participant's hands are genuinely raised above their upper torso.
+  - **MediaPipe GestureRecognizer** (`models/gesture_recognizer.task`): Classifies hand gestures in real time, detecting `Open_Palm` with high confidence.
+- **Participant Association & Both-Hands Verification**:
+  - Automatically groups raised hands with corresponding participants based on horizontal positioning across the camera view.
+  - Verifies that each participant has two distinct open palms raised (one on either side of their centerline, or verified by pose wrist elevation).
+- **Stability Hold Filter**: Once all participants have both open palms raised, a brief 0.40s hold duration is required before triggering, preventing accidental snaps.
+- **Live Viewfinder UI Feedback**:
+  - Highlights detected open palms with green tracking boxes and `✋ OPEN PALM` labels.
+  - Displays dynamic pills above each participant: `🙌 READY (2/2)` in green, `✋ RAISE 2ND (1/2)` in amber if only one hand is raised, or `RAISE BOTH HANDS` in grey.
+  - Shows a central status banner at the bottom with real-time progress (`🙌 RAISE BOTH HANDS: Open palms (1/3 ready)` $\to$ `🎉 ALL READY! Hold both hands steady...`).
+- Manual backup: <kbd>SPACE</kbd> or clicking the on-screen snap button remains available.
+
+### 2. Clean & Simplified Viewfinder UI
+- Streamlined footer control bar focused entirely on the core experience (`SNAP (RAISE HANDS ✋)` and `FEATURE GRID / LIVE CAMERA`).
+- Removed extraneous on-screen Fullscreen and Quit buttons to maximize display immersion (fullscreen toggle <kbd>F</kbd> and quit <kbd>Q</kbd>/<kbd>ESC</kbd> remain active via keyboard).
+
+### 3. Organized Photo Storage Subdirectories
+Captures are automatically categorized and saved into structured subfolders under `photos/`:
+```
+photos/
+├── full_images/     # Full-resolution camera captures (photobooth_YYYYMMDD_HHMMSS.jpg)
+├── cropped_faces/   # Square 1:1 face portraits (photobooth_YYYYMMDD_HHMMSS_person1.jpg, etc.)
+└── collages/        # A4 Master Collage posters (_collage.jpg) and 3 hybrids (_hybrid1..3.jpg)
+```
+- Bootstrapping: The Waiting Screen automatically indexes portraits from `photos/cropped_faces/` across application restarts.
+- Silent UI background saving: The pop-up preview toast continues displaying *only* the full group photo.
 
 ### 1. Facial Feature Extraction with Rotation Alignment
 When 3 faces are detected and the photo is snapped, the system isolates and crops individual facial anatomy in-memory for every person:
@@ -81,14 +111,7 @@ Directly inspired by the Swiss minimalist reference design:
 - Default 3-second animated countdown sequence with audio beeps and screen flash.
 - On-screen snap preview toast continues to display *only* the full group photo cleanly.
 
-### 7. Hardware Shutter Trigger (Arduino Nano ESP32 via OSC)
-- Support for physical arcade buttons and tactile hardware triggers via Open Sound Control (OSC 1.0 over UDP).
-- Built-in zero-dependency UDP listener binds to `0.0.0.0:8000` listening for `/button/press` packets sent by the included Arduino project (`Arduino_Button/OSC_Button/`).
-- Dispatches hardware triggers safely to the main Pygame UI thread with automatic debouncing.
-- In camera mode, pressing the physical button triggers the 3-second countdown (when $\ge 3$ faces are detected).
-- In Feature Breakdown Grid view, pressing the physical button skips the spinning animation or advances to the next collage.
-
-### 8. Animated Multi-Row Waiting Attractor Screen Carousel
+### 7. Animated Multi-Row Waiting Attractor Screen Carousel
 - When the booth is idle (no faces seen for $\ge 15$ seconds), the app smoothly transitions into a full-screen **attractor waiting screen**.
 - **Alternating Direction Marquee**: Displays a multi-row horizontal grid of all detected guest face crops collected throughout the runtime of the app (and loaded from disk across restarts).
   - Row 0 scrolls Left ($\leftarrow$)
@@ -97,10 +120,10 @@ Directly inspired by the Swiss minimalist reference design:
   - Row 3 scrolls Right ($\rightarrow$)
 - Features smooth, seamless infinite modular wrapping with staggered row velocities for an organic mechanical reel aesthetic.
 - Includes a floating central standby card with breathing pulse border (`#E44B7D`), live guest count, and clear call-to-action ("Step Up to the Camera", "3 Faces Required for Chimeric Mix").
-- **Zero Friction Wake-Up**: Instantly transitions back to the live camera viewfinder as soon as anyone steps into view, when the external hardware button is pressed, or when any key/click is registered.
+- **Zero Friction Wake-Up**: Instantly transitions back to the live camera viewfinder as soon as anyone steps into view, or when any key/click is registered.
 - Can also be toggled manually at any time by pressing <kbd>W</kbd>.
 
-### 9. Persistent Cropped Face Image Archiving
+### 8. Persistent Cropped Face Image Archiving
 - When a photo is taken, individual square 1:1 face crops for all detected participants are automatically archived to disk (`_person1.jpg`, `_person2.jpg`, `_person3.jpg`).
 - The on-screen pop-up preview toast continues to display *only* the full group photo cleanly without UI clutter.
 - Stored face crops are automatically indexed by the Waiting Screen on startup, ensuring past guests' portraits immediately populate the carousel wall across app launches.
@@ -117,12 +140,6 @@ You can pass command-line arguments to customize your photobooth session:
 
 # Configure idle timeout before Waiting Screen activates (default: 15.0s)
 ./run.sh --idle-timeout 15.0
-
-# Configure OSC hardware button port and address (defaults: port 8000, address /button/press)
-./run.sh --osc-port 8000 --osc-address /button/press
-
-# Disable OSC hardware button listener
-./run.sh --no-osc
 
 # Save photos to a custom folder
 ./run.sh --save-dir my_booth_photos
@@ -159,19 +176,17 @@ When running on macOS for the first time, your terminal application (e.g. Termin
 photobooth-app/
 ├── camera.py             # OpenCV webcam capture & fallback simulation (with landmarks)
 ├── face_detector.py      # Google MediaPipe FaceDetector with 7-point facial landmarks
+├── gesture_detector.py   # MediaPipe GestureRecognizer & PoseLandmarker for hands-up trigger
 ├── feature_extractor.py  # Isolates and crops eyes, ears, nose, mouth & face per person
 ├── slot_animator.py      # Slot machine reel timing, deceleration & constellation line
-├── osc_receiver.py       # Zero-dependency OSC UDP listener for Arduino hardware button
 ├── waiting_screen.py     # Standby attractor screen carousel alternating row directions
 ├── collage_generator.py  # Synthesizes chimeric hybrid faces & A4 master collage (1240x1754)
 ├── audio.py              # Synthesized shutter, countdown, and slot machine sound effects
 ├── ui.py                 # UI components (buttons, countdown, flash, toast, face boxes)
 ├── photobooth.py         # Main application loop, collage viewer, and window manager
 ├── run.sh                # Executable launcher script
-├── photos/               # Target folder where captured photos & collages are saved
-├── models/               # MediaPipe BlazeFace short-range TFLite model weights
-├── Arduino_Button/       # PlatformIO firmware for Arduino Nano ESP32 Wi-Fi button
-│   └── OSC_Button/
+├── photos/               # Categorized storage: full_images/, cropped_faces/, collages/
+├── models/               # MediaPipe neural models (BlazeFace, GestureRecognizer, PoseLandmarker)
 ├── AGENTS.md             # Architecture, constraints & developer guide
 ├── requirements.txt      # Python dependencies (mediapipe, opencv-python, pygame, numpy)
 └── tests/

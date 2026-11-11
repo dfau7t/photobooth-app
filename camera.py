@@ -32,6 +32,7 @@ class Camera:
         self.active_index: Optional[int] = None
         self.is_simulated = False
         self.simulated_face_count: int = 3
+        self.simulated_hands_up_count: int = 0
         self.simulated_face_boxes: List[Tuple[int, int, int, int]] = []
         self.simulated_face_landmarks: List[List[Tuple[int, int]]] = []
         self._sim_start_time = time.time()
@@ -229,6 +230,14 @@ class Camera:
     def set_simulated_face_count(self, count: int) -> None:
         """Sets number of simulated faces to render (0, 1, 2, or 3)."""
         self.simulated_face_count = max(0, min(5, count))
+
+    def set_simulated_hands_up_count(self, count: int) -> None:
+        """Sets number of simulated participants with hands up (0, 1, 2, or 3)."""
+        self.simulated_hands_up_count = max(0, min(5, count))
+
+    def get_simulated_hands_up_count(self) -> int:
+        """Returns the simulated count of participants with hands up."""
+        return self.simulated_hands_up_count if self.is_simulated else 0
 
     def get_simulated_face_boxes(self) -> List[Tuple[int, int, int, int]]:
         """Returns the simulated face bounding boxes if running in demo mode."""
