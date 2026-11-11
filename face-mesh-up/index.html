@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Face Mesh-up Booth</title>
+    <style>
+      /* Remove the default page margin so the canvas fills the whole window */
+      html, body { margin: 0; padding: 0; overflow: hidden; background: #141414; }
+      canvas { display: block; }
+    </style>
+
+    <!-- Handwriting font for the doodle caption -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap" rel="stylesheet" />
+
+    <!-- Libraries (loaded from the internet) -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+
+    <!-- Our own files. Order matters: config first, sketch last. -->
+    <script src="config.js"></script>
+    <script src="faces.js"></script>
+    <script src="features.js"></script>
+    <script src="halftone.js"></script>
+    <script src="pieces.js"></script>
+    <script src="collage.js"></script>
+    <script src="doodle.js"></script>
+    <script src="pen.js"></script>
+    <script src="hair.js"></script>
+    <script src="layout.js"></script>
+    <script src="diecut.js"></script>
+    <script src="owners.js"></script>
+    <script src="doodleAnim.js"></script>
+    <script src="collageDoodle.js"></script>
+    <script src="slot.js"></script>
+    <!-- Hands-up shutter. Loads MediaPipe itself, from the internet. -->
+    <script src="gesture.js"></script>
+    <script src="sketch.js"></script>
+  </head>
+  <body></body>
+</html>
