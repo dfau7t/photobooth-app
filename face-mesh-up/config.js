@@ -581,8 +581,9 @@ const CONFIG = {
   // The layout matches assets/reference/print_layout.png.
   print: {
     auto: true, // false = never print (testing without a printer): the status shows "PRINT OFF"
-    // 'server' = print with NO dialog on the Mac's default printer, through serve.py
-    // (it also keeps a copy in the prints/ folder). 'browser' = window.print() (the dialog).
+    // 'server' = print with NO dialog on the Mac's default printer, through server.py,
+    // with the paper / colour settings in CONFIG.printer (it also keeps a copy in
+    // the prints/ folder). 'browser' = window.print() (the dialog).
     method: "server",
     printingMs: 4000, // "PRINTING YOUR CASE FILE…" shows this long, then "Collect your case file…"
     collectMs: 15000, // after printing, the screen waits at least this long before going back to the start
@@ -645,6 +646,22 @@ const CONFIG = {
       goodbye: "You're free to go… for now.",
     },
     escalateAtMs: [0, 4000, 8000, 12000, 20000], // when the next line comes
+  },
+
+  // Printing (run `python3 server.py` instead of `python3 -m http.server 8000`).
+  // Uses your printer's defaults except bordered Postcard size and black & white in `lp`.
+  // Used for BOTH prints: the story's case file (print.js, CONFIG.print) and the
+  // classic booth's collage (printer.js, key P).
+  printer: {
+    autoPrint: false, // false = print only when you press P (true = auto-print when collage is ready)
+    name: "", // macOS printer name (empty = default printer)
+    media: "Postcard", // bordered 100x148 mm postcard (e.g. 'Postcard', 'Postcard.Fullbleed', 'A4')
+    mediaType: "", // empty = printer default
+    duplex: "", // empty = printer default (or 'None' for 1-sided)
+    quality: "", // empty = printer default
+    colorMode: "Gray", // 'Gray' = black & white in macOS lp (PNG stays in colour), '' = printer default
+    fitToPage: true, // scale the 1600x2000 collage to fit inside the postcard without cropping
+    saveCopy: true, // also save each printed PNG into face-mesh-up/prints/ (saved in colour)
   },
 
   // Not used yet (screen flow comes later)

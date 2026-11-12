@@ -25,9 +25,11 @@
 // opens the print dialog (someone has to click "Print"). So:
 //   'server' (the default): no dialog, no clicks.
 //      1. We draw the page as a separate high-resolution PICTURE.
-//      2. We send that picture to our own little server (serve.py, /print).
+//      2. We send that picture to our own little server (server.py, /print),
+//         with the printer settings from CONFIG.printer (paper, black & white...).
 //      3. The server saves it in the prints/ folder (the archive) and gives
 //         it to macOS's print command, which prints it on the DEFAULT printer.
+//      (printer.js does the same for the classic booth's collage, key P.)
 //   'browser': the old way, window.print() with the picture in a hidden
 //      <img id="print-image"> and print-only CSS (index.html). Shows the
 //      dialog, unless Chrome runs with --kiosk --kiosk-printing.
@@ -49,28 +51,43 @@ function printCaseFile() {
   else printInBrowser(g, name);
 }
 
-// Send the picture to serve.py, which saves it (prints/) and prints it
+// Send the picture to server.py, which saves it (prints/) and prints it
+// with the settings in CONFIG.printer (the same request as printer.js)
 function printOnServer(g, name) {
-  g.elt.toBlob(function (png) {
-    fetch('/print?name=' + name, { method: 'POST', body: png })
-      .then(function (response) {
-        if (response.status === 404 || response.status === 501) throw new Error('no print server');
-        return response.json();
-      })
-      .then(function (answer) {
-        if (answer.ok) console.log('Printing ' + name + '.png: ' + answer.job);
-        else {
-          console.error('Printing failed: ' + answer.error);
-          showMessage('Printing failed: ' + answer.error);
-        }
-        g.remove();
-      })
-      .catch(function (e) {
-        // Not running on serve.py (e.g. another web server): print the browser way
-        console.warn('Print server not reachable (' + e.message + '): using the print dialog instead. Start the app with: python3 serve.py');
-        printInBrowser(g, name);
-      });
-  }, 'image/png');
+  const cfg = CONFIG.printer;
+  fetch('/print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: g.elt.toDataURL('image/png'),
+      filename: name + '.png',
+      printer: cfg.name,
+      media: cfg.media,
+      mediaType: cfg.mediaType,
+      duplex: cfg.duplex,
+      quality: cfg.quality,
+      colorMode: cfg.colorMode,
+      fitToPage: cfg.fitToPage,
+      saveCopy: cfg.saveCopy,
+    }),
+  })
+    .then(function (response) {
+      // Started with another web server (e.g. python3 -m http.server): it can't print
+      if (response.status === 404 || response.status === 405 || response.status === 501) throw new Error('no print server');
+      return response.json();
+    })
+    .then(function (answer) {
+      if (answer.ok) console.log('Printing ' + name + '.png: ' + answer.job);
+      else {
+        console.error('Printing failed: ' + answer.error + (answer.hint ? ' (' + answer.hint + ')' : ''));
+        showMessage('Printing failed: ' + answer.error);
+      }
+      g.remove();
+    })
+    .catch(function (e) {
+      console.warn('Print server not reachable (' + e.message + '): using the print dialog instead. Start the app with: python3 server.py');
+      printInBrowser(g, name);
+    });
 }
 
 // The browser way: window.print() (a dialog, unless Chrome --kiosk-printing)

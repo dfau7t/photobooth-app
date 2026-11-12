@@ -8,25 +8,30 @@ The camera only works when the page is served from a web address, not opened as 
 
 ```bash
 cd face-mesh-up
-python3 serve.py
+python3 server.py
 ```
 
 Then open **http://localhost:8000** in Chrome and allow the camera.
 
-`serve.py` is like `python3 -m http.server 8000`, but it stops the browser from keeping old copies of the files. With the plain server, after a change the browser can mix old and new `.js` files, and a screen breaks.
+`server.py` serves the page like `python3 -m http.server 8000`, but it stops the browser from keeping old copies of the files (with the plain server, after a change the browser can mix old and new `.js` files, and a screen breaks), and it receives the pictures to print, so it can print silently to your macOS printer without a dialog.
 
-You can also paste the files into the p5.js web editor (https://editor.p5js.org): copy each `.js` file into a file with the same name and use this `index.html`.
+You can also paste the files into the p5.js web editor (https://editor.p5js.org): copy each `.js` file into a file with the same name and use this `index.html` (silent printing needs `server.py`).
+
+### Setting up your EPSON ET-4850 Series printer (100×148 mm postcard paper)
+
+1. Connect the printer to your Mac and add it in **System Settings → Printers & Scanners**, then set it as your **Default printer** (`EPSON_ET_4850_Series`).
+2. Even though macOS System Settings doesn't let you set Postcard as the system default, `config.js` leaves all other printer settings at your printer's defaults and only sets:
+   - `media: 'Postcard'` (bordered 100×148 mm postcard)
+   - `colorMode: 'Gray'` (prints in black & white via macOS `lp`, while saving the PNG in `prints/` in full colour)
+3. Press `P` on the collage screen to print (keeps a copy in `face-mesh-up/prints/`). Set `CONFIG.printer.autoPrint: true` in `config.js` if you want it to print automatically right after the slot machine finishes.
 
 ## Printing the case file (the installation)
 
-At the end of every round the case file prints by itself, in **black and white on a 4 x 6 in postcard** (the page is drawn in the US Letter layout, 8.5 x 11 in, and scaled down to fit; `print.js`, layout in `CONFIG.print.layout`, matching `assets/reference/print_layout.png`). The page: a header, a height chart with this round's composite standing in it (neck lines on the "100" rule), and three lines for the visitors to write their names on. It prints just after the AT LARGE stamp on the case-file screen, once per photo. `CONFIG.print.auto = false` switches printing off for testing (the screen shows "PRINT OFF"). `Shift+P` prints the case file again by hand.
+At the end of every round the case file prints by itself, in **black and white on a 100 × 148 mm postcard** (the page is drawn in the US Letter layout, 8.5 x 11 in, and scaled down to fit; `print.js`, layout in `CONFIG.print.layout`, matching `assets/reference/print_layout.png`). The page: a header, a height chart with this round's composite standing in it (neck lines on the "100" rule), and three lines for the visitors to write their names on. It prints just after the AT LARGE stamp on the case-file screen, once per photo. `CONFIG.print.auto = false` switches printing off for testing (the screen shows "PRINT OFF"). `Shift+P` prints the case file again by hand.
 
-**No dialog, no clicks.** A web page can't print by itself without the print dialog, so the page sends the finished picture to the local server (`serve.py`, address `/print`). The server saves it in the **`prints/` folder** (the archive, e.g. `prints/mugshot3_case_0002_2026-11-12_14-03-22.png`) and prints it with macOS's own print command (`lp`) on the **default printer**. So: **always start the app with `python3 serve.py`** (with another web server it falls back to the browser's print dialog). The terminal shows a line for every print, e.g. `Printing mugshot3_case_0002_….png: request id is EPSON_ET_4850_Series-12`.
+**No dialog, no clicks.** A web page can't print by itself without the print dialog, so the page sends the finished picture to the local server (`server.py`, address `/print`). The server saves it in the **`prints/` folder** (the archive, e.g. `prints/mugshot3_case_0002_2026-11-12_14-03-22.png`) and prints it with macOS's own print command (`lp`) on the **default printer**, with the settings in **`CONFIG.printer`** (the same ones the classic booth's `P` key uses, see "Setting up your EPSON" above): Postcard paper, black and white, scaled to fit. So: **always start the app with `python3 server.py`** (with another web server it falls back to the browser's print dialog). The terminal shows a line for every print.
 
-**Set up the printer once (macOS):**
-1. **Default printer:** System Settings → Printers & Scanners → *Default printer*: choose the booth printer (not "Last Printer Used"). Check it in Terminal: `lpstat -d`.
-2. **Paper:** load **4 x 6 in postcards**. The print settings are in `serve.py` (`PRINT_OPTIONS`): 4x6 paper, **black and white** (`ColorModel=Gray`), the page scaled to fit the printable area. (The page itself is still drawn in the Letter layout, so it prints smaller, with white bands at the top and bottom.) To use another printer than the default, add `"-d", "Printer_Name"` there (names: `lpstat -p`).
-3. **Test without printing:** `DRY_RUN=1 python3 serve.py` saves the pictures in `prints/` but doesn't print.
+**Set up the printer once (macOS):** see "Setting up your EPSON ET-4850 Series printer" above. To test without printing, set `CONFIG.print.auto = false` (the case file then doesn't print; the screen shows "PRINT OFF").
 
 The `prints/` folder holds visitors' faces: it's left out of git (`.gitignore`).
 
@@ -84,6 +89,7 @@ To open one screen directly, add it to the address: `http://localhost:8000/?scre
 | `M` | Mode: switch between `halftone` (Experiment A) and `doodle` (Experiment B). Works on the same photo, so you can compare. |
 | `T` | Doodle mode: hair style (`random` → `spikes` → `loops` → `flat` → `none`) |
 | `R` | Remix: same photo, new recipe (the slot machine spins again) |
+| `P` | Print the collage to the macOS printer |
 | `S` | Save the collage as a PNG (1600×2000) |
 | `V` | Switch between the collage and the photo it was made from |
 | `[` `]` | Halftone cell size smaller / bigger |
@@ -127,9 +133,11 @@ Tweaks made with the keys are lost on refresh. When you like a value, copy it in
 | `ui/torn.js` | Torn paper outlines, same rules (made once, exact size, fixed tears per name) |
 | `ui/components.js` | The building blocks every screen uses: TopBar, PageDots, KeyHint(Row), Toast, DoodleFrame, GridCell, Placard, TornPoster, stamps, FloorMark, NumberBadge, TornBand, ChalkFigure, FacePhoto, WantedPoster, SirenFlash, SlamWord, PoliceOfficer, SpeechBubble, StatusLabel, CameraView, HeightChart, Countdown, CameraFlash. They only read the design tokens (`ui.tokens` in `config.js`) |
 | `ui/debug.js` | The debug overlay (D) |
-| `print.js` | The printed case file: draws the US Letter page (300 dpi, positions in points scaled by dpi / 72; the composite is redrawn at print resolution), saves a PNG copy of the same page, and sends it to `serve.py`, which saves it in `prints/` and prints it on the default printer with no dialog (or, with `print.method = "browser"`, `window.print()` through the hidden `<img id="print-image">` and the print-only CSS in `index.html`) |
+| `print.js` | The printed case file: draws the US Letter page (300 dpi, positions in points scaled by dpi / 72; the composite is redrawn at print resolution), saves a PNG copy of the same page, and sends it to `server.py`, which saves it in `prints/` and prints it on the default printer with no dialog (settings: `CONFIG.printer`) (or, with `print.method = "browser"`, `window.print()` through the hidden `<img id="print-image">` and the print-only CSS in `index.html`) |
 | `sound.js` | All sounds with Web Audio: siren, screech, thud and radio static are synthesised; files (`ui.sound.files`) fall back to a synthesised sound if missing. Browsers only allow sound after a key press or click: for the installation start Chrome with `--autoplay-policy=no-user-gesture-required` |
 | `screens/*.js` | One file per MUGSHOT(3) screen, each with `enter()`, `update()`, `draw()`, `exit()`. `placeholder.js` draws the not-yet-built screens; `styleguide.js` is the style guide (G) |
+| `printer.js` | Sends the finished collage PNG to `server.py` for silent printing |
+| `server.py` | Local web + print server: serves the app and sends printed PNGs to macOS `lp` |
 | `sketch.js` | `setup()`, `draw()`, the camera and collage views, keys |
 
 ## Notes
