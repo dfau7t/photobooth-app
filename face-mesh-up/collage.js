@@ -1,7 +1,8 @@
 // =============================================================
 // collage.js — build the final mixed face.
 //
-//   makeRecipe()                          -> { base, eyes, nose, ears, lips, seed }
+//   makeRecipe(seed)                      -> { base, eyes, nose, ears, lips, seed } (seed: optional)
+//   testRecipes()                         Shift+T: checks 1000 recipes (console)
 //   composeCollage(snap, people, recipe)  -> p5.Graphics (1600 x 2000)
 //
 // Layers, bottom -> top:
@@ -16,23 +17,97 @@
 const DRAW_ORDER = ['ears', 'lips', 'nose', 'eyes'];
 
 // Pick who gives what. Numbers are 0, 1, 2 = person01, 02, 03.
-function makeRecipe() {
-  const recipe = { base: floor(random(3)) };
-  for (const feature of FEATURES) {
-    if (CONFIG.recipe.allowSelfFeature) {
-      recipe[feature] = floor(random(3));
-    } else {
-      // pick one of the two OTHER people
-      const others = [0, 1, 2].filter(function (n) {
-        return n !== recipe.base;
-      });
-      recipe[feature] = random(others);
+// Returns { base, eyes, nose, ears, lips, seed }.
+//
+// THE SEED: every random choice here comes from ONE number, the seed, so
+// the same seed always gives the same recipe (makeRecipe(seed) rebuilds
+// it). Without a seed, a new random one is picked.
+//
+// EVERYONE CONTRIBUTES (CONFIG.recipe.everyoneContributes):
+// each of the 3 people gives at least one of the 4 features. With 4
+// features and 3 people that's always a 2-1-1 split. How:
+//   1. start with [0, 1, 2]           (everybody once)
+//   2. add ONE more random person     e.g. [0, 1, 2, 1]  (person 02 gives two)
+//   3. SHUFFLE the list (Fisher–Yates) e.g. [1, 2, 0, 1]
+//   4. hand it out in order: eyes, nose, ears, lips
+//                                     eyes 02, nose 03, ears 01, lips 02
+// The base face is picked separately (any of the 3).
+function makeRecipe(seed) {
+  seed = seed ?? Math.floor(Math.random() * 1000000);
+  const rand = seededRandom(seed); // rand() = a number from 0 up to (not including) 1
+  const pick = (n) => Math.floor(rand() * n); // a whole number from 0 to n - 1
+  const recipe = { base: pick(3), seed: seed };
+
+  const cfg = CONFIG.recipe;
+  if (cfg.everyoneContributes && cfg.allowSelfFeature) {
+    const givers = [0, 1, 2, pick(3)]; // 1 + 2: everybody once, plus one more
+    shuffleInPlace(givers, rand); // 3
+    FEATURES.forEach((feature, i) => (recipe[feature] = givers[i])); // 4
+  } else {
+    if (cfg.everyoneContributes) {
+      // The base person can't give a feature, so they can't all contribute
+      console.warn('CONFIG.recipe.everyoneContributes needs allowSelfFeature: true. Using the old random recipe.');
+    }
+    // The old way: every feature picked on its own (all 4 can come from one person)
+    for (const feature of FEATURES) {
+      if (cfg.allowSelfFeature) {
+        recipe[feature] = pick(3);
+      } else {
+        const others = [0, 1, 2].filter((n) => n !== recipe.base); // one of the two OTHER people
+        recipe[feature] = others[pick(2)];
+      }
     }
   }
-  // The seed makes the random bits (misregistration) repeatable,
-  // so tweaking the halftone doesn't also shuffle the offsets.
-  recipe.seed = floor(random(1000000));
   return recipe;
+}
+
+// FISHER–YATES SHUFFLE: like drawing cards from a hat. Go through the list
+// from the END to the start; at each spot, swap in a random card from the
+// ones that haven't been placed yet (the spot itself included). Every
+// order comes out exactly equally likely, and it takes one pass.
+function shuffleInPlace(list, rand) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1)); // 0 … i
+    [list[i], list[j]] = [list[j], list[i]]; // swap
+  }
+  return list;
+}
+
+// A small random-number maker that always gives the SAME numbers for the
+// same seed ("mulberry32"). Its own, so it doesn't disturb p5's random().
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// SELF-TEST (Shift+T): make 1000 recipes, check that every person gives at
+// least one feature, and count who gives the double one (about 1/3 each).
+function testRecipes() {
+  const N = 1000;
+  let broken = 0;
+  const doubles = [0, 0, 0];
+  let sameSeedSame = true;
+  for (let n = 0; n < N; n++) {
+    const r = makeRecipe();
+    const counts = [0, 0, 0];
+    for (const feature of FEATURES) counts[r[feature]]++;
+    if (counts.includes(0)) broken++;
+    const two = counts.indexOf(2);
+    if (two >= 0) doubles[two]++;
+    if (JSON.stringify(makeRecipe(r.seed)) !== JSON.stringify(r)) sameSeedSame = false; // reproducible?
+  }
+  const share = (k) => nf((100 * doubles[k]) / N, 0, 1) + '%';
+  console.log('Recipe self-test (' + N + ' recipes, everyoneContributes: ' + CONFIG.recipe.everyoneContributes + ')');
+  console.log('  someone gave NO feature: ' + broken + (broken === 0 ? '  ✓' : '  ✗'));
+  console.log('  the double feature: person 01 ' + share(0) + ', person 02 ' + share(1) + ', person 03 ' + share(2) + '  (about 33% each)');
+  console.log('  same seed -> same recipe: ' + (sameSeedSame ? 'yes ✓' : 'NO ✗'));
+  showMessage('Recipe test: ' + (broken === 0 ? 'all ' + N + ' OK' : broken + ' of ' + N + ' broke the rule') + ' (see console)');
 }
 
 function composeCollage(snap, people, recipe) {

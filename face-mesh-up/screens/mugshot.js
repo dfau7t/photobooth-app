@@ -18,8 +18,20 @@
 // Testing alone: with H (demo hands up) still on, fewer than 3 faces
 // are filled up with copies of the faces we have, so the whole story
 // can be tested by one person.
+// SOUND (CONFIG.sound.countdown):
+//   - one beep the moment each number appears: "3" and "2" a mid beep,
+//     "1" a higher one (or the officer counts aloud: mode 'voice' / 'both')
+//   - the camera "snap" at the photo: played by takePhoto() (sketch.js),
+//     right where the frame is grabbed; the white flash starts that same frame.
+//     After "1" it comes after the same 1 s gap as between the numbers.
+//   HOW THE BEEPS STAY IN SYNC: there's ONE clock. Every frame, update()
+//   works out which number is showing (countdownNumber) and keeps it in
+//   this.number; draw() shows exactly that number. When it CHANGES to a
+//   lower number, update() plays its sound, in that same frame. So the
+//   picture and the sound always change together, and never twice: a
+//   number only sounds if it's LOWER than the last one that sounded.
+//
 // Keys: SPACE = take the photo now, H = demo on / off.
-// The shutter sound comes in milestone 8.
 //
 // (enter / update / draw / exit: see screens/welcome.js)
 // =============================================================
@@ -33,6 +45,8 @@ const mugshotScreen = {
   countdownEndsAt: 0, // when 3-2-1 reaches the photo
   capturedAt: 0, // when the photo was taken (0 = not yet)
   placards: [null, null, null], // where each placard is (follows its face smoothly)
+  number: 0, // the countdown number showing now (3, 2, 1), 0 = none
+  lastSounded: 4, // the last countdown number that made its sound (4 = none yet)
 
   enter() {
     const t = CONFIG.ui.tokens.mugshot;
@@ -40,6 +54,17 @@ const mugshotScreen = {
     this.countdownEndsAt = this.enteredAt + t.lookMs + t.countdownMs;
     this.capturedAt = 0;
     this.placards = [null, null, null];
+    this.number = 0;
+    this.lastSounded = 4;
+    // The radio from 02b must be silent, so the beeps are clear (it's
+    // normally long gone: 02b stops it at FREEZE! and when it's left)
+    stopSfx('radio', 150);
+  },
+
+  // The countdown number at time 'now' (3, 2, 1), or 0 (before it starts / after it ends)
+  countdownNumber(now) {
+    if (now < this.enteredAt + CONFIG.ui.tokens.mugshot.lookMs) return 0;
+    return max(0, ceil((this.countdownEndsAt - now) / 1000));
   },
 
   update() {
@@ -67,13 +92,22 @@ const mugshotScreen = {
       this.placards[i] = old ? { x: lerp(old.x, p.x, k), y: lerp(old.y, p.y, k) } : p;
     }
 
+    // ---- The countdown: the number, and its sound when it changes ----
+    // (It only depends on the clock, not on the faces: once started, it
+    // always runs to the end, sounds included.)
+    this.number = this.countdownNumber(now);
+    if (this.number >= 1 && this.number < this.lastSounded) {
+      this.lastSounded = this.number;
+      playCountdownStep(this.number); // sound.js: beep / voice / both
+    }
+
     // The countdown has finished: try to take the photo
     if (now >= this.countdownEndsAt) {
       const people = this.peopleForPhoto();
       if (people) {
-        takePhoto(people); // sketch.js: freeze frame + faces, recipe, collage
-        this.capturedAt = now;
-        // milestone 8: shutter sound here
+        takePhoto(people); // sketch.js: freeze frame + faces, recipe, collage, AND the snap sound
+        this.capturedAt = now; // the white flash starts now (same frame as the snap)
+        this.number = 0;
       } else if (now - this.countdownEndsAt >= t.captureGraceMs) {
         showMessage('Need exactly ' + CONFIG.faces.required + ' faces, found ' + liveFaces.length);
         goTo('wanted');
@@ -126,9 +160,9 @@ const mugshotScreen = {
     const lookEnds = this.enteredAt + t.mugshot.lookMs;
     let line = 'Look at the camera.';
     if (now >= lookEnds && this.capturedAt === 0) {
-      const left = ceil((this.countdownEndsAt - now) / 1000); // 3, 2, 1
-      if (left >= 1) Countdown(left, view.x + view.w / 2, view.y + view.h / 2);
-      line = left >= 1 ? 'Don\'t move…' : 'Hold still…';
+      // The number update() worked out this frame (the same one its beep is for)
+      if (this.number >= 1) Countdown(this.number, view.x + view.w / 2, view.y + view.h / 2);
+      line = this.number >= 1 ? 'Don\'t move…' : 'Hold still…';
     }
     if (this.capturedAt > 0) line = 'Booked.';
     push();
@@ -145,7 +179,9 @@ const mugshotScreen = {
 
   keyPressed() {
     if (key === ' ') {
-      this.countdownEndsAt = millis(); // take the photo now
+      // Take the photo now. The numbers not reached yet are skipped,
+      // silently (a number only sounds when it's lower than the last one).
+      this.countdownEndsAt = millis();
       return false;
     }
     if (key === 'h' || key === 'H') {
@@ -153,7 +189,9 @@ const mugshotScreen = {
     }
   },
 
-  exit() {},
+  exit() {
+    stopSpeech(); // a voice count still talking (goTo() stops the beeps / shutter)
+  },
 };
 
 // Where the camera picture sits on the stage (tokens.mugshot.view, centred)

@@ -253,8 +253,9 @@ const styleguideScreen = {
     const c = CONFIG.ui.colors;
     const t = CONFIG.ui.tokens;
     const h = t.handsup;
-    // A slam word (already landed), where it sits on the Hands Up screen
-    SlamWord('POLICE!', t.layout.margin, h.headlineBaseline, 0, 'shout', h.wordFrom);
+    // A slam word (already landed). On screen it's only used for "HANDS" /
+    // "UP!" in 02b (page 6); 02a has NO headline.
+    SlamWord('FREEZE!', t.layout.margin, h.headlineBaseline, 0, 'shout', h.wordFrom);
     caption('SlamWord  shout', gridX(5), h.headlineBaseline, c.muted);
     caption('SirenFlash: red / blue x ' + h.flashes + ', ' + CONFIG.ui.timing.sirenFlashMs + ' ms each (plays on screen 02)', gridX(0), 352, c.muted);
 
@@ -457,8 +458,10 @@ const styleguideScreen = {
       buttons.push({ name: name, x: gridX(0) + (i % 5) * (t.w + t.gap), y: 216 + floor(i / 5) * (t.h + t.gap) });
     });
     const y = 216 + ceil(names.length / 5) * (t.h + t.gap) + t.gap * 2;
-    ['volume-', 'volume+', 'mute', 'stop all', 'evidence + grid'].forEach(function (action, i) {
-      buttons.push({ action: action, x: gridX(0) + i * (t.w + t.gap), y: y });
+    // The actions, 5 per row: the countdown (03) in its three modes on the second row
+    const actions = ['volume-', 'volume+', 'mute', 'stop all', 'evidence + grid', 'countdown: beep', 'countdown: voice', 'countdown: both'];
+    actions.forEach(function (action, i) {
+      buttons.push({ action: action, x: gridX(0) + (i % 5) * (t.w + t.gap), y: y + floor(i / 5) * (t.h + t.gap) });
     });
     return buttons;
   },
@@ -478,10 +481,18 @@ const styleguideScreen = {
           mute: sfxMuted ? 'muted' : 'on',
           'stop all': 'every sound',
           'evidence + grid': 'the 04 screen, with its audio',
+          'countdown: beep': '3 · 2 · 1 (higher) · shutter',
+          'countdown: voice': 'the officer: "Three… two… one…"',
+          'countdown: both': 'beeps + voice',
         };
         SoundButton(b.action.toUpperCase(), subs[b.action], b.x, b.y, b.action === 'mute' && sfxMuted);
       }
     }
+    // The sound log (Shift+L on any screen), with what has played so far:
+    // next to the second row of actions (which has 3 buttons)
+    const st = CONFIG.ui.tokens.soundButton;
+    const last = this.soundTestButtons().pop(); // 'countdown: both', the third button of that row
+    SoundLog(sfxLog, last.x + st.w + st.gap, last.y + soundLogHeight());
     caption(soundUnlocked() ? 'Sound engine: on' : 'Sound engine: waiting for a click (the browser blocks sound until then)', gridX(0), 1000, c.muted);
     caption('STYLE GUIDE 10/10  SOUND TEST  ·  G first page  ·  U mute', gridX(0), 1048, c.muted);
   },
@@ -499,12 +510,20 @@ const styleguideScreen = {
       else if (b.action === 'volume+') setMasterVolume(CONFIG.sound.master + 0.1);
       else if (b.action === 'mute') toggleMute();
       else if (b.action === 'stop all') stopAllSfx(100);
+      else if (b.action.startsWith('countdown: ')) this.playCountdownTest(b.action.split(': ')[1]);
       else if (b.action === 'evidence + grid') {
         evidenceScreen.returnTo = 'styleguide'; // come back here afterwards
         goTo('evidence');
       }
       return;
     }
+  },
+
+  // The 03 countdown as it plays on the mugshot screen: 3, 2, 1 one
+  // second apart (the mode: 'beep', 'voice' or 'both'), then the shutter
+  playCountdownTest(mode) {
+    [3, 2, 1].forEach((n) => playCountdownStep(n, mode, (3 - n) * 1000));
+    playSfx('shutter', { delay: 3000 });
   },
 
   // O: the print reference on / off (page 8)

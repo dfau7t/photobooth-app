@@ -80,6 +80,8 @@ const SCREEN_ORDER = ['welcome', 'wanted', 'arrival', 'handsup', 'mugshot', 'evi
 const PAGE_DOTS = 7; // 00 – 06: each screen's 'number' says which dot is lit
 
 let currentScreenName = null; // e.g. 'handsup'
+let screenEnteredAt = 0; // millis() when we arrived on the current screen (for the sound log)
+let soundLogShown = false; // Shift+L: the sound log overlay (testing)
 let currentScreen = null; // the screen object itself, e.g. handsupScreen
 
 let classicMode = false; // TAB: true = show the classic booth instead
@@ -190,6 +192,7 @@ function draw() {
   if (!currentScreen.hideTopBar) TopBar(dot, PAGE_DOTS); // (the case file reveal hides it)
   Toast(message); // short messages (the classic booth keeps its own drawMessage)
   if (sfxMuted) SoundOffLabel(); // U
+  if (soundLogShown) SoundLog(sfxLog, CONFIG.ui.tokens.layout.margin, CONFIG.stage.height - CONFIG.ui.tokens.layout.margin); // Shift+L
   if (startOverlayShown()) StartOverlay(); // "CLICK TO START" (sound needs one click)
 
   pop();
@@ -209,6 +212,7 @@ function goTo(name) {
     stopScreenSfx(currentScreenName); // sound.js: its sounds stop (except 'keep' ones, e.g. the radio)
   }
   currentScreenName = name;
+  screenEnteredAt = millis();
   currentScreen = SCREENS[name];
   currentScreen.enter();
 }
@@ -332,7 +336,8 @@ function freezeSnapshot() {
 // moment, pick a recipe, and build the collage (no animation yet).
 // Used by the classic booth (SPACE) and by the MUGSHOT(3) mugshot screen.
 function takePhoto(people) {
-  snap = video.get();
+  snap = video.get(); // <- THE MOMENT THE PICTURE IS TAKEN
+  playCameraSnap(); // ...and its "snap", at exactly that moment (the screen starts the white flash now too)
   frozenFaces = copyFaces(people);
   console.log('Snapshot taken', snap.width + 'x' + snap.height, frozenFaces);
   recipe = makeRecipe();
@@ -341,6 +346,15 @@ function takePhoto(people) {
   // The story always uses the doodle collage: the forgery scene (05) draws
   // it on, piece by piece. The classic booth keeps its own style (M).
   rebuildCollage(false, classicMode ? renderMode : 'doodle');
+}
+
+// The camera "snap": the shutter sound, with every other sound turned
+// down for a moment so nothing covers it (CONFIG.sound.shutter).
+// Only takePhoto() calls this: once per photo (remix, R, takes no new photo).
+function playCameraSnap() {
+  const s = CONFIG.sound.shutter;
+  duckOthers('shutter', s.duckTo, s.duckMs);
+  playSfx('shutter');
 }
 
 // The slot machine is over (or skipped with SPACE): show the collage.
@@ -724,6 +738,17 @@ function keyPressed() {
   // The first key just closes "CLICK TO START" (and switches sound on)
   if (startOverlayShown()) {
     startOverlayDone = true;
+    return false;
+  }
+  // Shift+T works everywhere: the recipe self-test (collage.js, results in the console)
+  if (key === 'T') {
+    testRecipes();
+    return false;
+  }
+  // Shift+L works everywhere: the sound log (the last sounds played, for testing)
+  if (key === 'L') {
+    soundLogShown = !soundLogShown;
+    showMessage('Sound log: ' + (soundLogShown ? 'on' : 'off'));
     return false;
   }
   // U works everywhere: sound off / on

@@ -30,6 +30,7 @@
 //   SlamWord(words, x, baseline, startedAt, style, from)   a word that slams in
 //   PoliceOfficer(x, feetY, talking, facing)  the cartoon officer with a megaphone
 //   SpeechBubble(text, chars, x, cy, tail)  a doodle bubble that fits its words; types 'chars' letters
+//   SoundLog(entries, x, bottom)            the sound log overlay (Shift+L, testing)
 //   PoliceCar(x, groundY, state)            the police car (wheels, light bar, optional POLICE)
 //   SirenGlow(cx, cy, ms, strength)         a soft red / blue glow on the background
 //   GroundLine(y)                           a faint doodle line for the ground
@@ -1378,6 +1379,37 @@ function SoundOffLabel() {
   textAlign(RIGHT, BASELINE);
   text('SOUND OFF  (U)', CONFIG.stage.width - t.layout.margin, t.soundOff.y);
   pop();
+}
+
+// The sound log (Shift+L, for testing): the last sounds played, one per
+// line: screen, seconds since that screen started, name, file / synth.
+// (x, bottom) = its bottom-left corner. entries: sfxLog (sound.js), newest last.
+function SoundLog(entries, x, bottom) {
+  const t = CONFIG.ui.tokens.soundLog;
+  const c = CONFIG.ui.colors;
+  const h = soundLogHeight();
+  const y = bottom - h;
+  push();
+  noStroke();
+  fill(0, 255 * t.backdrop);
+  rect(x, y, t.w, h);
+  drawShape(rectShape('soundlog', t.w, h, t), x + t.w / 2, y + h / 2, c.muted);
+  setType(t.text);
+  textAlign(LEFT, BASELINE);
+  fill(c.muted);
+  text('SOUND LOG  (Shift+L)', x + t.padX, y + t.padY + t.lineH * 0.75);
+  entries.forEach(function (e, i) {
+    fill(e.kind === 'file' ? c.text : c.muted); // files white, synths grey
+    text(sfxLogLine(e), x + t.padX, y + t.padY + (i + 1.75) * t.lineH);
+  });
+  pop();
+  if (uiDebug) debugRect(x + t.w / 2, y + h / 2, t.w, h, 0);
+}
+
+// The sound log's height: a title line + tokens.soundLog.lines lines
+function soundLogHeight() {
+  const t = CONFIG.ui.tokens.soundLog;
+  return 2 * t.padY + (t.lines + 1) * t.lineH;
 }
 
 // One button of the sound test: the sound's name, and below it what's

@@ -84,7 +84,7 @@ const evidenceScreen = {
     this.useAudioClock = audioClockMs() !== null;
     this.startedAt = this.clockNow();
     // The recipe of this round, or a made-up one when there's no photo yet
-    this.picks = recipe || { base: 1, eyes: 0, nose: 2, ears: 1, lips: 0, seed: 7 };
+    this.picks = recipe || makeRecipe(7); // (the same made-up recipe every time: seed 7)
     this.photo = snap ? { img: snap, faces: frozenFaces, test: false } : null;
     this.cutCells();
     this.makePlan();

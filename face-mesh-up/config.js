@@ -138,7 +138,13 @@ const CONFIG = {
     },
   },
 
-  recipe: { allowSelfFeature: true }, // can a feature come from the base person?
+  recipe: {
+    allowSelfFeature: true, // can a feature come from the base person?
+    // true = each of the 3 people gives at least one of the 4 features (a 2-1-1
+    // split; collage.js makeRecipe). false = the old fully random way (one person
+    // can give everything). Needs allowSelfFeature: true.
+    everyoneContributes: true,
+  },
 
   output: {
     width: 1600, // the finished collage (and saved PNG) size: 4:5 portrait
@@ -273,7 +279,7 @@ const CONFIG = {
 
       // Screen 02, Hands Up: layout and timing
       handsup: {
-        headlineBaseline: 304, // "POLICE! HANDS UP!"
+        headlineBaseline: 304, // where a slam word sits (style guide page 3)
         posterX: [216, 520, 824], // the three small posters, in a row at the bottom left
         posterY: 712,
         statusY: 920, // the status label under each poster
@@ -282,8 +288,8 @@ const CONFIG = {
         bubbleRight: 1376, // the speech bubble: its right edge and middle
         bubbleY: 424,
         flashes: 3, // red + blue, this many times (each flash: timing.sirenFlashMs)
-        wordFrom: 1.6, // "POLICE!" and "HANDS UP!" slam in from 1.6x
-        wordGapMs: 250, // "HANDS UP!" comes this long after "POLICE!"
+        wordFrom: 1.6, // "HANDS" / "UP!" slam in from 1.6x
+        wordGapMs: 250, // (not used any more: 02b has its own, tokens.handsupLive.wordGapMs)
         entranceMs: 1200, // after this, the officer slides in and the hands count
         slideMs: 400, // how long the officer takes to slide in
         slideFrom: 720, // from this far to the right
@@ -307,7 +313,7 @@ const CONFIG = {
         popAt: 1700, // the officer comes out from behind the car (door thud)
         popMs: 400,
         officerX: 940, // where the officer ends up (right of the car)
-        headlineAt: 2000, // "POLICE!" slams in
+        handsupAt: 2000, // handsup.mp3 plays (the car has stopped, the officer is out); replaces the siren
         lineAt: 2300, // the bubble starts typing (and the radio starts)
         bubbleRight: 1824, // (old: the bubble's right edge when it had a fixed size)
         bubbleLeft: 1104, // the speech bubble: its LEFT edge (the tail side, near the officer)...
@@ -377,6 +383,8 @@ const CONFIG = {
       // Sound: the "CLICK TO START" overlay, the SOUND OFF label, the sound test buttons
       startOverlay: { w: 960, h: 320, backdrop: 0.85, stroke: "emphasis", wobble: "ui", ends: { overshoot: 8 } },
       soundOff: { y: 144 }, // the SOUND OFF label (right-aligned to the margin), under the top bar
+      // The sound log (Shift+L, for testing): the last sounds played, bottom-left
+      soundLog: { lines: 8, w: 640, lineH: 20, padX: 16, padY: 12, backdrop: 0.85, stroke: "hairline", wobble: "subtle", ends: { gap: 8 }, text: "caption" },
       soundButton: { w: 288, h: 80, gap: 24, stroke: "hairline", wobble: "subtle", ends: { gap: 8 } },
       // Screen 06: the print status in the right column of the case file
       printStatus: {
@@ -539,9 +547,9 @@ const CONFIG = {
       static: { file: "assets/sfx/static.mp3", volume: 0.4, synthFallback: "static" }, // 02b, a walkie-talkie burst before each line
       stamp: { file: "assets/sfx/stamp.mp3", volume: 0.8, synthFallback: "thud" }, // 02b SURRENDERED, 06 AT LARGE
       blip: { file: "assets/sfx/blip.mp3", volume: 0.5, synthFallback: "blip" }, // 02b FREEZE!, 06 goodbye
-      beep: { file: "assets/sfx/beep.mp3", volume: 0.5, synthFallback: "beep" }, // 03, countdown 3 and 2
-      beepHigh: { file: "assets/sfx/beep_high.mp3", volume: 0.5, synthFallback: "beepHigh" }, // 03, countdown 1
-      shutter: { file: "assets/sfx/shutter.mp3", volume: 0.7, synthFallback: "shutter" }, // 03, the photo + flash
+      countdownBeep: { file: "assets/sfx/countdown_beep.mp3", volume: 0.5, synthFallback: "beep" }, // 03, countdown "3" and "2" (880 Hz)
+      countdownFinal: { file: "assets/sfx/countdown_final.mp3", volume: 0.5, synthFallback: "beepHigh" }, // 03, countdown "1" (higher, 1320 Hz)
+      shutter: { file: "assets/sfx/shutter.mp3", volume: 0.7, synthFallback: "shutter" }, // 03 the camera snap (takePhoto), 06 the reveal flash
       evidence: { file: "assets/sfx/evidence_beeps_success.mp3", volume: 0.8, synthFallback: "evidenceTicks" }, // 04, played in segments (evidenceSegments)
       tick: { file: "assets/sfx/tick.mp3", volume: 0.5, synthFallback: "tick" }, // 04: one per highlight jump, only when the evidence file is missing
       tiptoe: { file: "assets/sfx/tiptoe.mp3", volume: 0.5, synthFallback: "pluck" }, // 05, one per step
@@ -563,6 +571,16 @@ const CONFIG = {
       fadeMs: 1500, // ...over this long. FREEZE! stops it (if still playing).
     },
     staticBeforeLineMs: 250, // 02b: a walkie-talkie burst this long, then the new line types
+    // 03: the camera snap (sounds.shutter: file + volume). While it plays, every
+    // other sound is turned down to duckTo for duckMs, so nothing covers it.
+    shutter: { duckTo: 0.3, duckMs: 300 },
+    // 03: the camera countdown 3 - 2 - 1 (screens/mugshot.js). One sound the
+    // moment each number appears; the shutter at the photo.
+    countdown: {
+      mode: "beep", // 'beep' (default) | 'voice' (the officer counts aloud) | 'both'
+      volume: 1, // times the beeps' own volume (sounds.countdownBeep / countdownFinal) and the voice's
+      words: { 3: "Three…", 2: "Two…", 1: "One…" }, // what the officer says ('voice' / 'both')
+    },
     // 04: evidence_beeps_success.mp3 is cut into SEGMENTS (in seconds)
     // and played in pieces, cued by the screen (screens/evidence.js).
     evidenceSegments: {
@@ -633,8 +651,10 @@ const CONFIG = {
   },
 
   police: {
-    car: { showText: false }, // true = "POLICE" on the car door (scene 02a)
+    car: { showText: false }, // "POLICE" on the car door (scene 02a): keep OFF (no POLICE text anywhere in 02a / 02b)
     voice: "text", // 'text' (speech bubbles only) | 'speech' (read aloud) | 'files' (recorded mp3s)
+    // His spoken voice (the browser's Web Speech; used by the countdown's 'voice' mode)
+    speech: { pitch: 0.6, rate: 0.9, lang: "en-US", voiceName: "" }, // low and slow; voiceName "" = the browser's default for lang
     lines: {
       start: "Hands where I can see them!",
       oneHand: "Nice try. BOTH hands.",

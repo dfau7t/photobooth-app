@@ -2,7 +2,8 @@
 // screens/arrival.js — scene 02a: the police arrive (page dot 02).
 //
 // In the story: a police car drives in with its siren on, the officer
-// jumps out with his megaphone: "POLICE!" — "Hands where I can see them!"
+// jumps out: "Hands where I can see them!" (no headline: the car, the
+// officer and his speech bubble tell the story on their own)
 // No camera yet. Then a quick red / blue flash -> scene 02b (handsup).
 //
 // HOW THE CAR ANIMATION WORKS
@@ -26,16 +27,15 @@
 //   4. THE OFFICER (popAt): slides out from behind the car with a
 //      little overshoot ("ease out back"). The car's body is filled
 //      black, so while he's behind it, it hides him.
-//   5. "POLICE!" slams in (headlineAt), then the bubble types his line
-//      (lineAt).
+//   5. The bubble types his line (lineAt).
 //   6. A quick red / blue flash at the end -> scene 02b.
 //
 // SOUNDS (all through sound.js; volumes and files in CONFIG.sound):
 //   0 ms        the siren, while the car drives in...
 //   screechAt   ...the tyres screech as it brakes...
 //   popAt       ...the car door thuds as the officer pops out...
-//   headlineAt  ..."POLICE!": handsup.mp3 (trimmed by CONFIG.sound.handsupClip,
-//               with a short fade-out) REPLACES the siren.
+//   handsupAt   ...the car has stopped: handsup.mp3 (trimmed by
+//               CONFIG.sound.handsupClip, with a short fade-out) REPLACES the siren.
 //   The police radio is booked to start CONFIG.sound.radio.afterHandsupMs
 //   after handsup.mp3 ends. It's played with keep: true, so it carries on
 //   into 02b. While the speech bubble types, it's turned down (duck).
@@ -79,10 +79,10 @@ const arrivalScreen = {
 
     // ---- Sounds, each at its moment, once ----
     const R = CONFIG.sound.radio;
-    this.once('siren', 0, () => playSfx('siren', { length: a.headlineAt })); // (the synth needs to know how long)
+    this.once('siren', 0, () => playSfx('siren', { length: a.handsupAt })); // (the synth needs to know how long)
     this.once('screech', a.screechAt, () => playSfx('screech'));
     this.once('thud', a.popAt, () => playSfx('thud'));
-    this.once('handsup', a.headlineAt, () => this.playHandsup());
+    this.once('handsup', a.handsupAt, () => this.playHandsup());
     // The radio: turned down while the bubble types, back up after
     this.once('duck', a.lineAt, () => duck('radio', R.duckTo, R.duckMs));
     this.once('unduck', a.lineAt + CONFIG.police.lines.start.length * CONFIG.ui.timing.typewriterMs, () => duck('radio', 1, R.duckMs));
@@ -90,7 +90,7 @@ const arrivalScreen = {
     if (ms >= CONFIG.ui.timing.arrivalMs) goTo('handsup');
   },
 
-  // "POLICE!": handsup.mp3 replaces the siren, and the radio is booked
+  // The car has stopped: handsup.mp3 replaces the siren, and the radio is booked
   // to start a moment after it ends
   playHandsup() {
     const clip = CONFIG.sound.handsupClip;
@@ -145,8 +145,7 @@ const arrivalScreen = {
 
     PoliceCar(carX, a.groundY, { wheelAngle: wheelAngle, lift: lift, tilt: tilt, ms: ms, speed: speed });
 
-    // ---- 5. POLICE! and the officer's line ----
-    SlamWord('POLICE!', t.layout.margin, t.handsup.headlineBaseline, millis() - ms + a.headlineAt, 'shout', t.handsup.wordFrom);
+    // ---- 5. The officer's line ----
     if (ms >= a.lineAt) {
       SpeechBubble(CONFIG.police.lines.start, this.typedLetters(ms), a.bubbleLeft, a.bubbleY, 'left');
     }

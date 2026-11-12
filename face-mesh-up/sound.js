@@ -7,12 +7,17 @@
 //                                   play a sound (by its name in CONFIG.sound.sounds)
 //   stopSfx(name, fadeMs)           stop it (fading out over fadeMs)
 //   duck(name, toVolume, ms)        make it quieter for a while (1 = back to normal)
+//   duckOthers(name, toVolume, ms)  turn every OTHER sound down for ms, then back up (the camera snap)
 //   isPlaying(name)                 is it playing right now?
 //   sfxPending(name)                playing, OR waiting to start (played with a delay)?
 //   currentTime(name)               how far into it we are (seconds), or null
 //   audioClockMs()                  the sound engine's own clock, in ms (null while sound is blocked)
 //   stopScreenSfx(screenName)       stop everything a screen started (goTo() does this)
 //   toggleMute()                    key U
+//   playCountdownStep(n, mode, ms)  the countdown sound for number n (3, 2, 1): beep / voice / both
+//   speakAloud(words, ms)           the officer says something (Web Speech), after ms
+//   stopSpeech()                    stop talking
+//   sfxLog                          the last sounds played (Shift+L shows them; also in the console)
 //   unlockSound()                   on the first click / key (see "BROWSERS")
 //
 // HOW IT WORKS
@@ -57,6 +62,7 @@ let audioCtx = null; // the browser's sound engine (made in setupSfx)
 let masterGain = null; // the master volume knob
 let sfxMuted = false; // U
 const sfxFiles = {}; // name -> { buffer, failed }
+const sfxLog = []; // the last sounds played, newest last: { name, screen, at, kind, delay } (Shift+L)
 const sfxPlays = {}; // name -> the latest play: { nodes, gain, startedAt, offset, duration, screen, keep, stopped }
 
 // ---------- 1. loading ----------
@@ -178,6 +184,7 @@ function playSfx(name, options) {
   gain.gain.value = def.volume * (o.volume ?? 1);
   gain.connect(masterGain);
 
+  logSfx(name, sfxFiles[name] && sfxFiles[name].buffer ? 'file' : 'synth', o.delay);
   const play = { name: name, gain: gain, startedAt: when, offset: 0, duration: 0, nodes: [], screen: currentScreenName, keep: !!o.keep, stopped: false };
   const file = sfxFiles[name];
   if (file && file.buffer) {
@@ -218,6 +225,65 @@ function playSfx(name, options) {
   return play;
 }
 
+// ---------- the countdown (03) and the officer's voice ----------
+
+// The sound for countdown number n (3, 2 or 1), in 'mode' (default
+// CONFIG.sound.countdown.mode), starting delayMs from now (default 0):
+//   beep:  3 and 2 = countdownBeep, 1 = countdownFinal (higher: the last one)
+//   voice: the officer says "Three…" / "Two…" / "One…"
+//   both:  the two together
+function playCountdownStep(n, mode, delayMs) {
+  const cd = CONFIG.sound.countdown;
+  mode = mode || cd.mode;
+  if (mode === 'beep' || mode === 'both') playSfx(n === 1 ? 'countdownFinal' : 'countdownBeep', { volume: cd.volume, delay: delayMs });
+  if (mode === 'voice' || mode === 'both') speakAloud(cd.words[n], delayMs, cd.volume);
+}
+
+// The officer says 'words' out loud (the browser's Web Speech), after
+// delayMs. Low and slow: CONFIG.police.speech. Web Speech doesn't go
+// through our mixing desk, so mute and the master volume are applied here.
+function speakAloud(words, delayMs, volume) {
+  if (!window.speechSynthesis || !words) return;
+  setTimeout(function () {
+    if (sfxMuted) return;
+    const s = CONFIG.police.speech;
+    const u = new SpeechSynthesisUtterance(words);
+    u.pitch = s.pitch;
+    u.rate = s.rate;
+    u.lang = s.lang;
+    u.volume = constrain(CONFIG.sound.master * (volume ?? 1), 0, 1);
+    const voice = speechSynthesis.getVoices().find((v) => v.name === s.voiceName);
+    if (voice) u.voice = voice;
+    speechSynthesis.speak(u);
+    logSfx('voice "' + words + '"', 'speech', 0);
+  }, delayMs || 0);
+}
+
+function stopSpeech() {
+  if (window.speechSynthesis) speechSynthesis.cancel();
+}
+
+// Remember a play for the sound log (Shift+L) and print it in the console:
+// which screen, how long after that screen started, file or synth
+function logSfx(name, kind, delay) {
+  const entry = {
+    name: name,
+    screen: currentScreenName,
+    at: (millis() - screenEnteredAt) / 1000, // seconds since the screen started
+    kind: kind,
+    delay: delay ? delay / 1000 : 0, // booked to start this many seconds later
+  };
+  sfxLog.push(entry);
+  if (sfxLog.length > CONFIG.ui.tokens.soundLog.lines) sfxLog.shift();
+  console.log('[sound] ' + sfxLogLine(entry));
+}
+
+// One line of the sound log, e.g. "arrival  +2.01 s  handsup  synth"
+function sfxLogLine(e) {
+  const later = e.delay ? '  (starts in ' + nf(e.delay, 0, 2) + ' s)' : '';
+  return e.screen + '  +' + nf(e.at, 0, 2) + ' s  ' + e.name + '  ' + e.kind + later;
+}
+
 // Stop a sound, fading out over fadeMs (0 = at once)
 function stopSfx(name, fadeMs) {
   const play = sfxPlays[name];
@@ -251,6 +317,25 @@ function duck(name, toVolume, ms) {
   play.gain.gain.cancelScheduledValues(now);
   play.gain.gain.setValueAtTime(play.gain.gain.value, now);
   play.gain.gain.linearRampToValueAtTime(target, now + (ms ?? 200) / 1000);
+}
+
+// Turn every sound that's playing, except 'name', down to toVolume (a
+// share of its current volume) for 'ms', then back up. So nothing covers
+// a short important sound, e.g. the camera snap.
+function duckOthers(name, toVolume, ms) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  for (const other in sfxPlays) {
+    const play = sfxPlays[other];
+    if (other === name || play.stopped || now >= play.startedAt + play.duration) continue; // (finished: skip)
+    const g = play.gain.gain;
+    const level = g.value;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(level, now);
+    g.linearRampToValueAtTime(level * toVolume, now + 0.02); // down, quickly
+    g.setValueAtTime(level * toVolume, now + ms / 1000);
+    g.linearRampToValueAtTime(level, now + ms / 1000 + 0.1); // and back up
+  }
 }
 
 function isPlaying(name) {
@@ -412,22 +497,27 @@ const SYNTHS = {
     return { nodes: [beepTone(ctx, out, when, 880, 0.12, 'sine')], duration: 0.12 };
   },
   beepHigh(ctx, out, when) {
-    return { nodes: [beepTone(ctx, out, when, 1320, 0.25, 'sine')], duration: 0.25 };
+    return { nodes: [beepTone(ctx, out, when, 1320, 0.12, 'sine')], duration: 0.12 }; // the same beep, higher
   },
 
   // A camera shutter: two clicks (open, close) and a soft flash whine
+  // A crisp mechanical camera shutter ("snap"): the blades open (a sharp
+  // high click, ~10 ms) and close again 45 ms later (a slightly lower
+  // click), with a tiny low "thunk" of the mechanism under the first one.
   shutter(ctx, out, when) {
-    const nodes = [clickNoise(ctx, out, when, 0.8), clickNoise(ctx, out, when + 0.07, 0.6)];
-    const whine = ctx.createOscillator();
-    whine.type = 'sine';
-    whine.frequency.setValueAtTime(2000, when);
-    whine.frequency.exponentialRampToValueAtTime(6000, when + 0.25);
-    const env = envelope(ctx, when, 0.15, 0.01, 0.3, 0.2);
-    whine.connect(env).connect(out);
-    whine.start(when);
-    whine.stop(when + 0.3);
-    nodes.push(whine);
-    return { nodes: nodes, duration: 0.3 };
+    const open = clickNoise(ctx, out, when, 0.9, 3000, 0.01); // high-passed noise, 10 ms
+    const close = clickNoise(ctx, out, when + 0.045, 0.7, 1800, 0.012); // lower, 45 ms later
+    const thunk = ctx.createOscillator(); // the low thunk: a short sine dropping 140 -> 60 Hz
+    thunk.type = 'sine';
+    thunk.frequency.setValueAtTime(140, when);
+    thunk.frequency.exponentialRampToValueAtTime(60, when + 0.04);
+    const level = ctx.createGain();
+    level.gain.setValueAtTime(0.5, when);
+    level.gain.exponentialRampToValueAtTime(0.001, when + 0.05);
+    thunk.connect(level).connect(out);
+    thunk.start(when);
+    thunk.stop(when + 0.06);
+    return { nodes: [open, close, thunk], duration: 0.07 };
   },
 
   // A soft camera click
@@ -577,14 +667,18 @@ function beepTone(ctx, out, when, hz, length, type) {
 }
 
 // A click: a tiny burst of high noise
-function clickNoise(ctx, out, when, level) {
-  const noise = noiseSource(ctx, 0.02);
+// A click: a burst of noise through a high-pass filter (only the hiss
+// above 'hz' gets through), dying away in 'seconds'.
+// hz and seconds are optional (2000 Hz, 20 ms).
+function clickNoise(ctx, out, when, level, hz, seconds) {
+  const length = seconds ?? 0.02;
+  const noise = noiseSource(ctx, length);
   const filter = ctx.createBiquadFilter();
   filter.type = 'highpass';
-  filter.frequency.value = 2000;
+  filter.frequency.value = hz ?? 2000;
   const g = ctx.createGain();
   g.gain.setValueAtTime(level, when);
-  g.gain.exponentialRampToValueAtTime(0.001, when + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.001, when + length);
   noise.connect(filter).connect(g).connect(out);
   noise.start(when);
   return noise;
