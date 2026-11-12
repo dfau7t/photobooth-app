@@ -8,12 +8,22 @@ The camera only works when the page is served from a web address, not opened as 
 
 ```bash
 cd face-mesh-up
-python3 -m http.server 8000
+python3 server.py
 ```
 
 Then open **http://localhost:8000** in Chrome and allow the camera.
 
-You can also paste the files into the p5.js web editor (https://editor.p5js.org): copy each `.js` file into a file with the same name and use this `index.html`.
+(`server.py` serves the page just like `python3 -m http.server 8000`, and also receives the finished collage so it can print silently to your macOS printer without a popup dialog.)
+
+You can also paste the files into the p5.js web editor (https://editor.p5js.org): copy each `.js` file into a file with the same name and use this `index.html` (silent printing needs `server.py`).
+
+### Setting up your EPSON ET-4850 Series printer (100×148 mm postcard paper)
+
+1. Connect the printer to your Mac and add it in **System Settings → Printers & Scanners**, then set it as your **Default printer** (`EPSON_ET_4850_Series`).
+2. Even though macOS System Settings doesn't let you set Postcard as the system default, `config.js` leaves all other printer settings at your printer's defaults and only sets:
+   - `media: 'Postcard'` (bordered 100×148 mm postcard)
+   - `colorMode: 'Gray'` (prints in black & white via macOS `lp`, while saving the PNG in `prints/` in full colour)
+3. Press `P` on the collage screen to print (keeps a copy in `face-mesh-up/prints/`). Set `CONFIG.printer.autoPrint: true` in `config.js` if you want it to print automatically right after the slot machine finishes.
 
 ## Keys (so far)
 
@@ -24,6 +34,7 @@ You can also paste the files into the p5.js web editor (https://editor.p5js.org)
 | `M` | Mode: switch between `halftone` (Experiment A) and `doodle` (Experiment B). Works on the same photo, so you can compare. |
 | `T` | Doodle mode: hair style (`random` → `spikes` → `loops` → `flat` → `none`) |
 | `R` | Remix: same photo, new recipe (the slot machine spins again) |
+| `P` | Print the collage to the macOS printer |
 | `S` | Save the collage as a PNG (1600×2000) |
 | `V` | Switch between the collage and the photo it was made from |
 | `[` `]` | Halftone cell size smaller / bigger |
@@ -63,6 +74,8 @@ Tweaks made with the keys are lost on refresh. When you like a value, copy it in
 | `collageDoodle.js` | Experiment B: `composeDoodle()`: places the base head on a white page and draws the doodle |
 | `slot.js` | The slot machine after the photo: a grid of everyone's features (rows) per person (columns); each row spins and stops on the person in the recipe, then all the picks blink together like a jackpot |
 | `gesture.js` | The hands-up shutter: MediaPipe PoseLandmarker (arms raised?) + GestureRecognizer (open palm?), matched to person 01/02/03 by position |
+| `printer.js` | Sends the finished collage PNG to `server.py` for silent printing |
+| `server.py` | Local web + print server: serves the app and sends printed PNGs to macOS `lp` |
 | `sketch.js` | `setup()`, `draw()`, the camera and collage views, keys |
 
 ## Notes

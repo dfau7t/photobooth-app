@@ -1,6 +1,10 @@
 .venv/
 __pycache__/
 *.pyc
-photos/*.jpg
-photos/*.png
+photos/collages/*.jpg
+photos/collages/*.png
+photos/cropped_faces/*.jpg
+photos/cropped_faces/*.png
+photos/full_images/*.jpg
+photos/full_images/*.png
 .DS_Store

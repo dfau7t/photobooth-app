@@ -9,7 +9,7 @@
 //   - H (live) demo: pretend everyone has their hands up
 //   - after the photo, a slot machine reveals the recipe (slot.js), then the collage
 //   - SPACE again goes back to the live camera
-//   - R remix, S save PNG, V show the photo instead of the collage
+//   - R remix, P print, S save PNG, V show the photo instead of the collage
 //   - [ ] cell size, - = dot size, C cut style, H halftone pieces
 //   - D debug overlay, F full screen
 // =============================================================
@@ -63,6 +63,7 @@ function setup() {
   document.fonts.load(CONFIG.doodle.caption.size + 'px ' + CONFIG.doodle.caption.font);
   pixelDensity(1); // keeps things fast on big / retina screens
   updateStageFit();
+  checkPrintServer(); // see if server.py and a macOS printer are ready (printer.js)
 
   // Ask for the camera at a high resolution
   const constraints = {
@@ -114,7 +115,7 @@ function draw() {
   } else if (snap) {
     // FROZEN, collage view
     drawCollageView();
-    drawBanner('M mode  ·  R remix  ·  S save PNG  ·  V photo  ·  SPACE back to live');
+    drawBanner('M mode  ·  R remix  ·  P print  ·  S save PNG  ·  V photo  ·  SPACE back to live');
   } else {
     // LIVE: show the camera with the faces found right now
     updateZoneTiles(video); // give each zone's detector the newest frame
@@ -186,6 +187,7 @@ function freezeSnapshot() {
 function finishSlot() {
   stopSlot();
   if (renderMode === 'doodle') startDoodleAnimation(collage);
+  if (CONFIG.printer.autoPrint) printCollage();
 }
 
 // Everyone held their hands up: start the 3-2-1
@@ -323,6 +325,10 @@ function drawCollageView() {
     text(s[1], x + 90, y);
     y += 42;
   }
+  fill(CONFIG.colors.people[0]);
+  text('P', x, y);
+  fill(CONFIG.colors.ink);
+  text('print          ' + printStatusText(), x + 90, y);
 }
 
 // ---------- drawing helpers ----------
@@ -479,11 +485,13 @@ function drawDebugPanel() {
     'faces:    ' + people.length,
     'per zone: ' + perZone.join('  '),
     'state:    ' + (snap ? 'frozen' : 'live'),
+    'printer:  ' + printStatusText(),
     '',
     'SPACE capture / back to live',
     'H     demo hands up (live)',
     'G     gestures: ' + (gestureEnabled ? 'on' : 'off'),
     'R     remix    S  save PNG',
+    'P     print collage',
     'V     photo / collage',
     'D     debug overlay',
     'M     mode: ' + renderMode,
@@ -492,7 +500,7 @@ function drawDebugPanel() {
 
   noStroke();
   fill(20, 20, 20, 200);
-  rect(20, 20, 440, lines.length * 30 + 24);
+  rect(20, 20, 500, lines.length * 30 + 24);
   fill(CONFIG.colors.paper);
   textFont('monospace');
   textSize(22);
@@ -610,6 +618,7 @@ function keyPressed() {
   }
   // A: play the doodle animation again
   if (k === 'a' && renderMode === 'doodle') startDoodleAnimation(collage);
+  if (k === 'p') printCollage();
   if (k === 's') saveCollage();
   if (k === 'v') showSnapshot = !showSnapshot;
 

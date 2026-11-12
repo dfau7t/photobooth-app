@@ -174,6 +174,20 @@ const CONFIG = {
     holdMs: 1500, // how long the finished slot machine stays before the collage
   },
 
+  // Printing (run `python3 server.py` instead of `python3 -m http.server 8000`).
+  // Uses your printer's defaults except bordered Postcard size and black & white in `lp`.
+  printer: {
+    autoPrint: false, // false = print only when you press P (true = auto-print when collage is ready)
+    name: "", // macOS printer name (empty = default printer)
+    media: "Postcard", // bordered 100x148 mm postcard (e.g. 'Postcard', 'Postcard.Fullbleed', 'A4')
+    mediaType: "", // empty = printer default
+    duplex: "", // empty = printer default (or 'None' for 1-sided)
+    quality: "", // empty = printer default
+    colorMode: "Gray", // 'Gray' = black & white in macOS lp (PNG stays in colour), '' = printer default
+    fitToPage: true, // scale the 1600x2000 collage to fit inside the postcard without cropping
+    saveCopy: true, // also save each printed PNG into face-mesh-up/prints/ (saved in colour)
+  },
+
   // Not used yet (screen flow comes later)
   timing: {
     stableMs: 1000,
