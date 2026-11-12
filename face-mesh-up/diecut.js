@@ -56,7 +56,7 @@ function makeSticker(snap, plan) {
   mask.pixelDensity(1);
   mask.noStroke();
   mask.fill(255);
-  drawShape(mask, shape, pw / 2, ph / 2);
+  drawCutShape(mask, shape, pw / 2, ph / 2);
   photoImg.mask(mask.get());
   mask.remove();
 
@@ -71,7 +71,7 @@ function makeSticker(snap, plan) {
   // Half of the outline sits outside the shape, so the edge is 'border' wide.
   g.fill(255);
   stickerEdgeStroke(g, 255, border);
-  drawShape(g, shape, outW / 2, outH / 2);
+  drawCutShape(g, shape, outW / 2, outH / 2);
 
   // The photo on top
   g.imageMode(CENTER);
@@ -87,7 +87,7 @@ function makeSticker(snap, plan) {
     shadow.drawingContext.filter = 'blur(3px)'; // soft edges
     shadow.fill(ink);
     stickerEdgeStroke(shadow, ink, border);
-    drawShape(shadow, shape, outW / 2, outH / 2);
+    drawCutShape(shadow, shape, outW / 2, outH / 2);
     shadow.drawingContext.filter = 'none';
   }
 
@@ -231,8 +231,9 @@ function ovalPoints(a, b, count) {
   return pts;
 }
 
-// Draw a shape (list of corners around 0,0) centred on (cx, cy)
-function drawShape(g, shape, cx, cy) {
+// Draw a cut shape (list of corners around 0,0) centred on (cx, cy).
+// (Not called drawShape: ui/doodleLine.js has a drawShape of its own.)
+function drawCutShape(g, shape, cx, cy) {
   g.beginShape();
   for (const p of shape) g.vertex(cx + p.x, cy + p.y);
   g.endShape(CLOSE);

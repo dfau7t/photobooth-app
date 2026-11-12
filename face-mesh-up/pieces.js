@@ -162,6 +162,25 @@ function cutPhoto(snap, part, zoom) {
   return g;
 }
 
+// A PIXELATED copy of a picture: big square blocks, so you can guess what
+// it is but not see it clearly (the evidence screen). How: shrink the
+// picture so each block becomes ONE pixel, then blow it up again with
+// smoothing OFF, so each pixel becomes a hard-edged square.
+// block = the block size in px. Returns a new p5.Graphics (free it with .remove()).
+function pixelate(img, block) {
+  const w = img.width;
+  const h = img.height;
+  const small = createGraphics(max(1, ceil(w / block)), max(1, ceil(h / block)));
+  small.pixelDensity(1);
+  small.image(img, 0, 0, small.width, small.height);
+  const big = createGraphics(w, h);
+  big.pixelDensity(1);
+  big.noSmooth(); // hard-edged blocks, not a blur
+  big.image(small, 0, 0, w, h);
+  small.remove();
+  return big;
+}
+
 // Cut one part out of the photo, levelled (eye line horizontal),
 // scaled to output size, made grayscale (or halftone), and shaped.
 // Returns a p5.Image.

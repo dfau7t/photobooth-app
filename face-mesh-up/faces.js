@@ -156,12 +156,17 @@ function tileFaceToCamera(face, zone) {
   return f;
 }
 
-// Return a NEW list of faces sorted from left to right in the camera image.
+// Return a NEW list of faces sorted left to right.
 // faces[0] = person01, faces[1] = person02, faces[2] = person03.
+// "Left to right" depends on CONFIG.faces.numbering:
+//   "screen": as seen on the (mirrored) screen = the visitors' own left to right
+//   "camera": as seen in the camera image
+// With a mirrored preview the two are opposite, so we flip the order.
 function sortFacesLeftToRight(faceList) {
   const sorted = faceList.slice(); // copy, so we don't change the original
+  const flip = CONFIG.faces.numbering === 'screen' && CONFIG.camera.mirror;
   sorted.sort(function (a, b) {
-    return a.box.xMin - b.box.xMin;
+    return flip ? b.box.xMin - a.box.xMin : a.box.xMin - b.box.xMin;
   });
   return sorted;
 }

@@ -2,17 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Face Mesh-up Booth</title>
+    <title>MUGSHOT(3)</title>
     <style>
       /* Remove the default page margin so the canvas fills the whole window */
-      html, body { margin: 0; padding: 0; overflow: hidden; background: #141414; }
+      html, body { margin: 0; padding: 0; overflow: hidden; background: #000000; }
       canvas { display: block; }
+
+      /* PRINTING (print.js): the case file is a separate US Letter picture
+         in the hidden <img id="print-image">. On screen it's never shown.
+         When the page is printed, EVERYTHING else is hidden and the picture
+         fills exactly one Letter page (8.5 x 11 in), with no margins. */
+      #print-image { display: none; }
+      @media print {
+        @page { size: letter portrait; margin: 0; }
+        html, body { background: #ffffff; overflow: visible; }
+        body > *:not(#print-image) { display: none !important; }
+        #print-image { display: block; width: 8.5in; height: 11in; }
+      }
     </style>
 
     <!-- Handwriting font for the doodle caption -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap" rel="stylesheet" />
+    <!-- MUGSHOT(3) fonts: Anton (headlines), JetBrains Mono (labels, numbers), Fira Code (body + lead text), Inter -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Fira+Code:wght@400;600&family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
 
     <!-- Libraries (loaded from the internet) -->
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
@@ -36,7 +53,31 @@
     <script src="slot.js"></script>
     <!-- Hands-up shutter. Loads MediaPipe itself, from the internet. -->
     <script src="gesture.js"></script>
+    <!-- All sounds (Web Audio: synthesised, plus files in assets/sounds/) -->
+    <script src="sound.js"></script>
+    <!-- The printed case file (US Letter, window.print()) -->
+    <script src="print.js"></script>
+
+    <!-- MUGSHOT(3): the interface (ui/) and one file per screen (screens/) -->
+    <script src="ui/doodleLine.js"></script>
+    <script src="ui/torn.js"></script>
+    <script src="ui/debug.js"></script>
+    <script src="ui/components.js"></script>
+    <script src="screens/placeholder.js"></script>
+    <script src="screens/styleguide.js"></script>
+    <script src="screens/welcome.js"></script>
+    <script src="screens/wanted.js"></script>
+    <script src="screens/arrival.js"></script>
+    <script src="screens/handsup.js"></script>
+    <script src="screens/mugshot.js"></script>
+    <script src="screens/evidence.js"></script>
+    <script src="screens/forgery.js"></script>
+    <script src="screens/casefile.js"></script>
+
     <script src="sketch.js"></script>
   </head>
-  <body></body>
+  <body>
+    <!-- The printed case file (print.js). Hidden on screen; the only thing on the printed page. -->
+    <img id="print-image" alt="" />
+  </body>
 </html>

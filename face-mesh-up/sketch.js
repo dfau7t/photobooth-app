@@ -1,7 +1,18 @@
 // =============================================================
 // sketch.js — the main program
 //
-// What this does:
+// TWO MODES (TAB switches):
+//
+// 1. MUGSHOT(3) — the story, one screen at a time (the default).
+//    A small "state machine": only ONE screen is active. The screens
+//    live in screens/*.js; this file only switches between them with
+//    goTo('handsup'). ← → or the ">>>" button move to the screen
+//    before / after (for testing).
+//
+// 2. CLASSIC BOOTH — the booth as it was before MUGSHOT(3).
+//    It keeps working until the new screens take over its jobs.
+//
+// What the classic booth does:
 //   - shows the camera full screen (mirrored, like a mirror)
 //   - finds up to 3 faces, sorts them left -> right, labels them 01 02 03
 //   - all 3 people raise both hands (open palms) -> 3-2-1 -> photo (gesture.js)
@@ -47,11 +58,60 @@ let stageScale = 1;
 let stageX = 0;
 let stageY = 0;
 
+// ---------- MUGSHOT(3): the screens ----------
+
+// Every screen, by name. (The screen objects are made in screens/*.js,
+// which index.html loads before this file.)
+const SCREENS = {
+  welcome: welcomeScreen,
+  wanted: wantedScreen,
+  arrival: arrivalScreen, // scene 02a: the police car
+  handsup: handsupScreen, // scene 02b: hands up (live camera)
+  mugshot: mugshotScreen,
+  evidence: evidenceScreen,
+  forgery: forgeryScreen, // scene 05: the bandits forge the composite
+  casefile: casefileScreen,
+  styleguide: styleguideScreen, // not part of the story: the style guide (key G)
+};
+
+// The order of the story: 00 -> 05 (also the order of the page dots)
+// 02 has two scenes (arrival, handsup), so there are 8 screens but 7 page dots.
+const SCREEN_ORDER = ['welcome', 'wanted', 'arrival', 'handsup', 'mugshot', 'evidence', 'forgery', 'casefile'];
+const PAGE_DOTS = 7; // 00 – 06: each screen's 'number' says which dot is lit
+
+let currentScreenName = null; // e.g. 'handsup'
+let currentScreen = null; // the screen object itself, e.g. handsupScreen
+
+let classicMode = false; // TAB: true = show the classic booth instead
+
+// The faces found right now, sorted: liveFaces[0] = person01.
+// Kept up to date on every screen that says usesFaces: true.
+let liveFaces = [];
+
+// A: should the story move on by itself? (off = stay on this screen, for testing)
+let autoAdvance = CONFIG.ui.autoAdvance && new URLSearchParams(window.location.search).get('auto') !== '0';
+
+// One round = one group of three suspects, from the welcome screen to
+// the case file. Things that must stay the same for the whole round live here.
+// (Not called 'round': that would replace p5's round() function!)
+let storyRound = { bookingNumbers: ['00000000', '00000000', '00000000'] };
+
+// Start a new round (called when we arrive on the welcome screen)
+function startNewRound() {
+  if (snap) unfreeze(); // forget the last group's photo and collage
+  storyRound = {
+    // A random 8-digit booking number per person, e.g. "48213907"
+    bookingNumbers: [0, 1, 2].map(() => nf(floor(Math.random() * 1e8), 8)),
+    radioStarted: false, // the police radio has been played this round (02a / 02b)
+  };
+}
+
 // ---------- p5 setup ----------
 
 function preload() {
   // ml5 needs the model to be loaded here, before setup()
   loadFaceModels(); // one face detector per zone (see faces.js)
+  preloadSfx(); // sound.js: fetch the sound files (missing ones: the synth plays)
 }
 
 function setup() {
@@ -61,8 +121,20 @@ function setup() {
   // time the first collage is drawn (otherwise the caption falls back
   // to a plain font)
   document.fonts.load(CONFIG.doodle.caption.size + 'px ' + CONFIG.doodle.caption.font);
+  // Same for the MUGSHOT(3) fonts
+  const fonts = CONFIG.ui.fonts;
+  for (const name of [fonts.display, fonts.mono, fonts.body]) {
+    document.fonts.load('40px "' + name + '"');
+  }
   pixelDensity(1); // keeps things fast on big / retina screens
   updateStageFit();
+
+  // The first MUGSHOT(3) screen. For testing, the web address can choose
+  // another one: http://localhost:8000/?screen=handsup
+  const fromAddress = new URLSearchParams(window.location.search).get('screen');
+  setupSfx(); // sound.js: the sound engine, and the files decoded into sound
+  goTo(SCREENS[fromAddress] ? fromAddress : CONFIG.ui.startScreen);
+  if (uiDebug) showMessage('Debug overlay: on'); // ?debug=1 in the address
 
   // Ask for the camera at a high resolution
   const constraints = {
@@ -80,13 +152,94 @@ function setup() {
 function onCameraReady() {
   video.size(video.elt.videoWidth, video.elt.videoHeight);
   startFaceDetection(video);
-  setupGesture(video); // loads the hands-up models in the background (gesture.js)
+  // (The hands-up models load later: in scene 02a, or when the classic booth opens.)
   cameraReady = true;
 }
 
 // ---------- the main loop ----------
 
 function draw() {
+  if (classicMode) {
+    drawClassic(); // the booth as it was before MUGSHOT(3)
+    return;
+  }
+
+  background(CONFIG.ui.colors.stage); // also the colour of the bars around the stage
+
+  // Everything inside push/pop is drawn on our 1920x1080 stage
+  push();
+  translate(stageX, stageY);
+  scale(stageScale);
+
+  // Faces: only on the screens that need them (this also feeds the face detectors)
+  if (cameraReady && currentScreen.usesFaces) {
+    updateZoneTiles(video);
+    liveFaces = sortFacesLeftToRight(getLiveFaces());
+  } else {
+    liveFaces = [];
+  }
+
+  // The current screen: first its logic, then its drawing
+  currentScreen.update();
+  currentScreen.draw();
+
+  // On top of every screen
+  // The lit page dot = the screen's number ('02' -> dot 2; '--' -> none)
+  const dot = /^[0-9]+$/.test(currentScreen.number) ? int(currentScreen.number) : -1;
+  if (!currentScreen.hideTopBar) TopBar(dot, PAGE_DOTS); // (the case file reveal hides it)
+  Toast(message); // short messages (the classic booth keeps its own drawMessage)
+  if (sfxMuted) SoundOffLabel(); // U
+  if (startOverlayShown()) StartOverlay(); // "CLICK TO START" (sound needs one click)
+
+  pop();
+}
+
+// ---------- switching screens ----------
+
+// Go to a screen by its name, e.g. goTo('handsup').
+// The old screen cleans up (exit), the new one starts (enter).
+function goTo(name) {
+  if (!SCREENS[name]) {
+    console.warn('There is no screen called', name);
+    return;
+  }
+  if (currentScreen) {
+    currentScreen.exit();
+    stopScreenSfx(currentScreenName); // sound.js: its sounds stop (except 'keep' ones, e.g. the radio)
+  }
+  currentScreenName = name;
+  currentScreen = SCREENS[name];
+  currentScreen.enter();
+}
+
+// The next / previous screen in the story. After the last screen we
+// go back to the first one (and the other way round).
+function nextScreen() {
+  const i = SCREEN_ORDER.indexOf(currentScreenName);
+  goTo(SCREEN_ORDER[(i + 1) % SCREEN_ORDER.length]);
+}
+
+function previousScreen() {
+  const i = SCREEN_ORDER.indexOf(currentScreenName);
+  goTo(SCREEN_ORDER[(i - 1 + SCREEN_ORDER.length) % SCREEN_ORDER.length]);
+}
+
+// TAB: switch between MUGSHOT(3) and the classic booth
+function toggleClassicMode() {
+  classicMode = !classicMode;
+  if (classicMode && cameraReady) setupGesture(video); // the classic booth needs the hand models
+  cursor(ARROW); // the top bar may have left a pointing hand
+  showMessage(classicMode ? 'Classic booth  ·  TAB back to MUGSHOT(3)' : 'MUGSHOT(3)');
+}
+
+// The mouse position on the STAGE (1920x1080), not in the window
+function stageMouse() {
+  return { x: (mouseX - stageX) / stageScale, y: (mouseY - stageY) / stageScale };
+}
+
+// ---------- the classic booth ----------
+
+function drawClassic() {
   background(CONFIG.colors.ink); // colour for the bars around the stage
 
   // Everything inside push/pop is drawn on our 1920x1080 stage
@@ -168,17 +321,25 @@ function freezeSnapshot() {
 
   stopGesture(); // leaving the live screen: pause the hands-up models
 
-  // Copy the frame and the faces at the SAME moment
+  // Take the photo and build the collage (without its animation). The
+  // slot machine plays first; finishSlot() then shows the collage.
+  takePhoto(people);
+  startSlot(snap, frozenFaces, recipe);
+}
+
+// Take the photo: copy the camera frame and these faces at the SAME
+// moment, pick a recipe, and build the collage (no animation yet).
+// Used by the classic booth (SPACE) and by the MUGSHOT(3) mugshot screen.
+function takePhoto(people) {
   snap = video.get();
   frozenFaces = copyFaces(people);
   console.log('Snapshot taken', snap.width + 'x' + snap.height, frozenFaces);
-
-  // Mix! The collage is built now (without its animation), and the
-  // slot machine plays first. finishSlot() then shows the collage.
   recipe = makeRecipe();
   recipe.number = nextMeshNumber();
-  rebuildCollage(false);
-  startSlot(snap, frozenFaces, recipe);
+  recipe.capturedAt = millis(); // for the "capture -> print" time in the console (casefile.js)
+  // The story always uses the doodle collage: the forgery scene (05) draws
+  // it on, piece by piece. The classic booth keeps its own style (M).
+  rebuildCollage(false, classicMode ? renderMode : 'doodle');
 }
 
 // The slot machine is over (or skipped with SPACE): show the collage.
@@ -213,18 +374,19 @@ function drawCountdown() {
 // (after a remix or after changing a setting).
 // animate = true: in doodle mode, play the drawing animation.
 // (Settings tweaks pass nothing, so you see the result straight away.)
-function rebuildCollage(animate) {
+function rebuildCollage(animate, mode) {
   if (!snap) return;
+  mode = mode ?? renderMode; // 'doodle' or 'halftone' (default: the classic booth's M setting)
   freeCollage();
   const startTime = millis();
   // Same photo, same recipe: only the drawing style is different
-  if (renderMode === 'doodle') {
+  if (mode === 'doodle') {
     collage = composeDoodle(snap, frozenFaces, recipe);
     if (animate) startDoodleAnimation(collage);
   } else {
     collage = composeCollage(snap, frozenFaces, recipe);
   }
-  console.log(renderMode + ' collage built in ' + round(millis() - startTime) + ' ms', recipe);
+  console.log(mode + ' collage built in ' + round(millis() - startTime) + ' ms', recipe);
 }
 
 // Free the memory of the old collage (and its animation layers)
@@ -488,6 +650,7 @@ function drawDebugPanel() {
     'D     debug overlay',
     'M     mode: ' + renderMode,
     'F     full screen',
+    'TAB   back to MUGSHOT(3)',
   ];
 
   noStroke();
@@ -546,9 +709,83 @@ function windowResized() {
   updateStageFit();
 }
 
-// ---------- keyboard ----------
+// ---------- keyboard and mouse ----------
 
 function keyPressed() {
+  unlockSound(); // browsers only allow sound after a key or click (sound.js)
+  // The first key just closes "CLICK TO START" (and switches sound on)
+  if (startOverlayShown()) {
+    startOverlayDone = true;
+    return false;
+  }
+  // U works everywhere: sound off / on
+  if (key === 'u' || key === 'U') {
+    showMessage(toggleMute() ? 'Sound off (U)' : 'Sound on');
+    return false;
+  }
+  // TAB works everywhere: MUGSHOT(3) <-> classic booth
+  if (keyCode === TAB) {
+    toggleClassicMode();
+    return false; // stop the browser from moving the focus
+  }
+
+  if (classicMode) return keyPressedClassic();
+
+  // MUGSHOT(3) keys
+  if (keyCode === RIGHT_ARROW) nextScreen();
+  else if (keyCode === LEFT_ARROW) previousScreen();
+  else if (key === 'f' || key === 'F') fullscreen(!fullscreen());
+  else if (key === 'P') {
+    // Shift+P: print the case file again by hand (for testing).
+    // This doesn't count as "printed": the case file still prints by itself.
+    if (collage && recipe) printCaseFile();
+    else showMessage('Nothing to print yet: take a mugshot first');
+  }
+  else if (key === 'g' || key === 'G') {
+    // The style guide; G again goes to its next page
+    if (currentScreenName === 'styleguide') styleguideScreen.page = (styleguideScreen.page + 1) % STYLEGUIDE_PAGES;
+    else goTo('styleguide');
+  } else if (key === 'a' || key === 'A') {
+    autoAdvance = !autoAdvance; // stay on one screen while testing
+    showMessage('Auto-advance: ' + (autoAdvance ? 'on' : 'off'));
+  }
+  else if (key === 'd' || key === 'D') {
+    uiDebug = !uiDebug; // red reference shapes + measurements (ui/debug.js)
+    uiDebugLogged = false; // print the measurements again
+    showMessage('Debug overlay: ' + (uiDebug ? 'on' : 'off'));
+  }
+  // Any other key: the screen can handle it, if it wants to
+  // (e.g. SPACE or H on the Hands Up screen, in later milestones)
+  else if (currentScreen.keyPressed) return currentScreen.keyPressed();
+}
+
+function mousePressed() {
+  unlockSound();
+  // The first click just closes "CLICK TO START" (and switches sound on)
+  if (startOverlayShown()) {
+    startOverlayDone = true;
+    return;
+  }
+  if (classicMode) return;
+  if (isOverNextButton(stageMouse())) nextScreen(); // the ">>>" button
+  else if (currentScreen.mousePressed) currentScreen.mousePressed(stageMouse()); // e.g. the sound test buttons
+}
+
+// "CLICK TO START": shown once, at launch, while the browser blocks sound.
+// (Chrome started with --autoplay-policy=no-user-gesture-required allows
+// sound straight away, so it never shows: see the README.)
+let startOverlayDone = false;
+function startOverlayShown() {
+  if (startOverlayDone || !CONFIG.sound.startOverlay) return false;
+  if (soundUnlocked()) {
+    startOverlayDone = true; // sound is allowed already: never show it
+    return false;
+  }
+  return true;
+}
+
+// The keys of the classic booth
+function keyPressedClassic() {
   // During the slot machine, SPACE skips straight to the collage
   if (isSlotPlaying() && key === ' ') {
     finishSlot();
@@ -604,7 +841,8 @@ function keyPressed() {
 
   if (k === 'r') {
     recipe = makeRecipe(); // same photo, new mix
-    recipe.number = nextMeshNumber(); // a new mix is a new mesh
+    recipe.number = nextMeshNumber();
+  recipe.capturedAt = millis(); // for the "capture -> print" time in the console (casefile.js) // a new mix is a new mesh
     rebuildCollage(false);
     startSlot(snap, frozenFaces, recipe); // spin again for the new recipe
   }

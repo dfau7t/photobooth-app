@@ -113,6 +113,10 @@ function composeDoodle(snap, people, recipe) {
     lightColour: lightColour,
     stickers: stickers,
     overlay: overlay,
+    // For the print (print.js): the pieces' plans, so they can be cut again
+    // at print resolution. Same order as 'stickers'. (lines[1] and lines[2]
+    // are the two neck lines: the print stands them on its "100" rule.)
+    plans: DRAW_ORDER.flatMap((feature) => plans.filter((p) => p.feature === feature)),
   };
   return g;
 }

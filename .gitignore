@@ -4,3 +4,4 @@ __pycache__/
 photos/*.jpg
 photos/*.png
 .DS_Store
+face-mesh-up/prints/

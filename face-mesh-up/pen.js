@@ -5,6 +5,8 @@
 //   penStrokes(points, weight) -> the line cut into strokes of different thickness
 //   drawStrokes(g, strokes, colour)
 //
+// Used by the doodle collage AND by the interface (via ui/doodleLine.js).
+//
 // The steps, for every line:
 //   1. SMOOTH:   turn the few landmark points into a smooth curve
 //   2. RESAMPLE: put points evenly along it, every ~6 px
@@ -15,16 +17,27 @@
 //   5. DRAW:     in short pieces, each with a slightly different thickness
 // =============================================================
 
+// SHARED: the collage uses these functions, and so does the interface
+// (ui/doodleLine.js), so the UI and the final poster have the same line.
+// Every setting is optional: anything left out comes from
+// CONFIG.doodle.line (the collage's pen). The UI passes its own, thinner values.
+
 // Turn a list of points into a hand-drawn version of it.
-// options.closed: true = the line is a loop (the head)
-// options.sharp:  true = keep the corners (hair spikes), don't round them
+// options.closed:  true = the line is a loop (the head)
+// options.sharp:   true = keep the corners (hair spikes), don't round them
+// options.wobble:  how far the line drifts sideways (px)
+// options.spacing: a point every this many px
 function handDrawn(points, options) {
   const cfg = CONFIG.doodle.line;
+  // 'a ?? b' means: use a, but if a wasn't given, use b
+  const spacing = options.spacing ?? cfg.spacing;
+  const wobbleAmount = options.wobble ?? cfg.wobble;
+
   let pts = options.sharp ? points.slice() : smoothPoints(points, options.closed);
   if (options.closed) pts.push(pts[0]); // walk all the way round, back to the start
-  pts = resample(pts, cfg.spacing);
+  pts = resample(pts, spacing);
   if (options.closed) pts = penStartAndEnd(pts);
-  return wobble(pts, cfg.wobble);
+  return wobble(pts, wobbleAmount);
 }
 
 // ---------- 1. smooth ----------
@@ -159,8 +172,9 @@ function wobble(points, amount) {
 // Returns a list of { points, weight }. We work this out ONCE, so the
 // animation can draw the strokes one by one and look exactly like the
 // finished picture.
-function penStrokes(points, weight) {
-  const variation = CONFIG.doodle.line.weightVariation;
+// 'variation' is optional: how much thicker / thinner (0.15 = ±15%).
+function penStrokes(points, weight, variation) {
+  variation = variation ?? CONFIG.doodle.line.weightVariation;
   const pieceLength = 6; // points per stroke
   const noiseStart = random(1000);
 
@@ -184,7 +198,10 @@ function drawStroke(g, stroke, colour) {
   drawPath(g, stroke.points, false);
 }
 
-// Draw a whole list of strokes
-function drawStrokes(g, strokes, colour) {
-  for (const s of strokes) drawStroke(g, s, colour);
+// Draw a whole list of strokes.
+// 'count' is optional: only draw the first 'count' strokes
+// (used to make a line "draw itself on", bit by bit).
+function drawStrokes(g, strokes, colour, count) {
+  const n = count ?? strokes.length;
+  for (let i = 0; i < n && i < strokes.length; i++) drawStroke(g, strokes[i], colour);
 }
