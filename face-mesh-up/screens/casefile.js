@@ -19,22 +19,36 @@
 //        RIGHT  "MUGSHOT(3)" + case number, the evidence marker "3", the
 //               recipe (who gave what), "Status:" + AT LARGE, print status
 //   THEN
-//   5. The case file PRINTS by itself, once per photo (print.js):
-//      "PRINTING YOUR CASE FILE…", then "Collect your case file…" ✓.
-//      (CONFIG.print.auto = false: no printing, "PRINT OFF".) The console
-//      logs the time from the photo to the print.
-//   6. GOODBYE: the officer peeks in: "You're free to go… for now."
-//      Then -> welcome: after timing.casefileMs, but never sooner than
-//      print.collectMs after printing (time to collect it).
+//   5. The case file PRINTS by itself, once per photo (print.js). The
+//      console logs the time from the photo to the print.
+//   THE PRINT WAIT (printing takes ~30 s; the browser can't know when the
+//   printer is really done, so it's an ESTIMATE: CONFIG.print.printMs, or
+//   print.previewMs when printing is off, CONFIG.print.auto = false):
+//      0–2 s: the poster shrinks into the left third, the case file column
+//      fades away, "PRINTING YOUR CASE FILE…" types in at the top, and a
+//      doodle printer rises into the middle.
+//      Then, for the rest of the time: the REAL printed page (a small copy)
+//      slides up out of the printer, top first, so it works as a progress
+//      bar; a doodle progress bar + "~XX s left" under it; the printer
+//      shakes gently and the page jiggles like paper being fed.
+//   DONE! (timing.printWait.doneMs, ~1.5 s): a stamp on the finished page, with a ding.
+//   THE FINAL CASE FILE: back to the full case file, exactly as after the
+//      reveal (the SAME drawLayout): the poster grows back from the left
+//      (growMs), the column fades back in, AT LARGE slams again (a quieter
+//      thud), and "Collect your case file →" points to the printer's side of
+//      the booth (CONFIG.print.printerSide). It stays print.collectMs (15 s).
+//   GOODBYE: the officer peeks in: "You're free to go… for now." -> welcome.
+//   MUSIC (CONFIG.music): low (0.2) during the reveal, a swell to 0.9 at the
+//   flash, 0.7 while printing, back up to 0.9 for the final case file.
 //
 // Like the evidence screen, the sound moments are a "cue sheet" (cues):
 // written down when we arrive, played when their time comes. SPACE skips
 // the cues it jumps over (no pile of sounds at once).
 //
-// Keys: SPACE = skip the reveal (straight to the finished case file,
-//       which then prints, still only once); SPACE again = back to the
-//       start. S = save the composite as a PNG. Shift+P (any screen) =
-//       the print dialog by hand.
+// Keys: SPACE = skip to the next part (reveal -> case file -> DONE! ->
+//       final case file -> goodbye -> back to the start); it still prints,
+//       once. S = save the composite as a PNG. Shift+P (any screen) = print
+//       it again by hand.
 //
 // (enter / update / draw / exit: see screens/welcome.js)
 // =============================================================
@@ -83,7 +97,13 @@ const casefileScreen = {
     t.flash = lastLands + R.fadeMs + R.pauseMs; // the flash...
     t.layout = t.flash; // ...with the full case file under it
     t.stamp = t.flash + R.flashMs; // AT LARGE, once the flash has faded
-    t.print = t.stamp + R.printDelayMs;
+    t.print = t.stamp + R.printDelayMs; // printing starts: the PRINT WAIT begins
+    t.pageFrom = t.print + CONFIG.ui.timing.printWait.shrinkMs; // the page starts coming out
+    t.printDone = t.print + (CONFIG.print.auto ? CONFIG.print.printMs : CONFIG.print.previewMs); // (estimated) done: DONE!
+    const W = CONFIG.ui.timing.printWait;
+    t.final = t.printDone + W.doneMs; // the full case file grows back...
+    t.restamp = t.final + W.growMs; // ...and AT LARGE slams on again
+    t.goodbye = t.final + CONFIG.print.collectMs; // after collectMs: the goodbye officer
     this.times = t;
     this.pieces = features.map((feature, i) => ({ feature: feature, at: t.drops + i * R.dropGapMs }));
 
@@ -93,15 +113,16 @@ const casefileScreen = {
       this.cues.push({ at: p.at + R.dropMs, what: 'land', i: i });
     });
     this.cues.push({ at: t.flash, what: 'flash' }, { at: t.stamp, what: 'stamp' }, { at: t.print, what: 'print' });
+    this.cues.push({ at: t.printDone, what: 'done' }, { at: t.final, what: 'final' }, { at: t.restamp, what: 'restamp' });
     this.cues.sort((a, b) => a.at - b.at);
   },
 
-  // When we go back to the start: after casefileMs, but never sooner
-  // than collectMs after printing (people are collecting their print)
+  // When we go back to the start: after the final case file has stayed
+  // collectMs (people are collecting their print) and the goodbye has
+  // played; never sooner than casefileMs
   leaveAt() {
-    let at = this.enteredAt + CONFIG.ui.timing.casefileMs;
-    if (recipe && recipe.printedAt) at = max(at, recipe.printedAt + CONFIG.print.printingMs + CONFIG.print.collectMs);
-    return at;
+    const g = CONFIG.ui.tokens.casefile.goodbye;
+    return this.enteredAt + max(CONFIG.ui.timing.casefileMs, this.times.goodbye + g.showMs);
   },
 
   update() {
@@ -119,7 +140,7 @@ const casefileScreen = {
   // runs (normally less than one frame).
   playCue(cue, late) {
     const R = CONFIG.ui.timing.reveal;
-    if (cue.what === 'line') {
+    if (cue.what === 'line' && late < R.lineMs) { // (already over: nothing to draw or hear)
       // The reveal animation (doodleAnim.js), at the reveal's slower pace
       if (collage.parts) {
         startDoodleAnimation(collage, { lineMs: R.lineMs, dropGapMs: R.dropGapMs, dropMs: R.dropMs, fadeMs: R.fadeMs });
@@ -135,12 +156,33 @@ const casefileScreen = {
     } else if (cue.what === 'flash') {
       stopDoodleAnimation(); // (it's finished by now anyway)
       playSfx('shutter');
+      setMusicLevel(CONFIG.music.casefile.flash, CONFIG.music.casefile.swellMs); // the music swells (music.js)
     } else if (cue.what === 'stamp') {
       const at = this.stampPosition();
       this.stamp = makeStamp('AT LARGE', { x: at.x, y: at.y, size: 'M', color: CONFIG.ui.colors.sirenRed });
       showStamp(this.stamp);
       playSfx('stamp');
+    } else if (cue.what === 'done') {
+      // DONE!: a stamp on the page (now fully out of the printer), with a ding
+      const pw = CONFIG.ui.tokens.printWait;
+      const pageH = this.pageImg ? (pw.page.w * this.pageImg.height) / this.pageImg.width : 0;
+      this.doneStamp = makeStamp('DONE!', { x: pw.printer.cx, y: pw.printer.slotY - pageH / 2, size: 'L', color: CONFIG.ui.colors.sirenRed });
+      showStamp(this.doneStamp);
+      playSfx('ding');
+      playSfx('stamp');
+    } else if (cue.what === 'final') {
+      // Back to the full case file: the music swells again, and the AT
+      // LARGE stamp waits (hidden) until the poster has grown back
+      setMusicLevel(CONFIG.music.casefile.final, CONFIG.music.casefile.swellMs);
+      if (this.stamp) this.stamp.shownAt = -1;
+    } else if (cue.what === 'restamp') {
+      if (this.stamp) showStamp(this.stamp);
+      playSfx('stamp', { volume: CONFIG.sound.restampVolume }); // quieter than the first time
     } else if (cue.what === 'print') {
+      setMusicLevel(CONFIG.music.casefile.printing, CONFIG.music.casefile.printingFadeMs); // and settles while it prints
+      // A small copy of the printed page, for the page coming out of the
+      // doodle printer (made whether printing is on or off)
+      if (!this.pageImg) this.pageImg = makePrintImage(collage.parts, recipe.number, CONFIG.ui.tokens.printWait.page.dpi);
       // The "printed" mark is kept ON the recipe (= this photo), so it
       // survives leaving and re-entering this screen. A new photo prints.
       if (CONFIG.print.auto && !recipe.printedAt) {
@@ -167,14 +209,6 @@ const casefileScreen = {
     return { x: gridX(cf.columnX) + statusW + cf.stampGap + stampW / 2, y: cf.statusBaseline - t.type.lead.size / 3 };
   },
 
-  // Where the printing stands: 'waiting' (not time yet), 'printing', 'done' or 'off'
-  printState() {
-    if (this.ms() < this.times.print) return 'waiting';
-    if (!CONFIG.print.auto) return 'off';
-    if (!recipe || !recipe.printedAt) return 'waiting';
-    return millis() - recipe.printedAt < CONFIG.print.printingMs ? 'printing' : 'done';
-  },
-
   draw() {
     // No photo yet this round: the placeholder
     if (!collage) {
@@ -183,7 +217,10 @@ const casefileScreen = {
     }
     const ms = this.ms();
     if (ms < this.times.layout) this.drawReveal(ms);
-    else this.drawLayout(ms);
+    else if (ms < this.times.print) this.drawLayout(ms, 0);
+    else if (ms < this.times.final) this.drawPrintWait(ms);
+    else this.drawFinal(ms);
+    this.drawGoodbye();
 
     // The camera flash: white, fading out
     const k = (ms - this.times.flash) / CONFIG.ui.timing.reveal.flashMs;
@@ -239,13 +276,21 @@ const casefileScreen = {
   },
 
   // ---- The full case file (after the flash) ----
-  drawLayout(ms) {
+  // away: 0 = all there, 1 = shrunk away (the print wait's first 2 s):
+  // the poster moves + shrinks into the left third, the column fades out.
+  drawLayout(ms, away) {
     const t = CONFIG.ui.tokens;
     const cf = t.casefile;
     const c = CONFIG.ui.colors;
+    const pw = t.printWait.poster;
 
     // LEFT: the poster with the finished composite
-    CaseFilePoster(collage, cf.poster.cx, cf.poster.cy, cf.poster.angle);
+    push();
+    translate(lerp(cf.poster.cx, pw.cx, away), lerp(cf.poster.cy, pw.cy, away));
+    scale(lerp(1, pw.scale, away));
+    CaseFilePoster(collage, 0, 0, cf.poster.angle);
+    pop();
+    if (away >= 1) return; // the column has gone
 
     // RIGHT: the case file
     const x = gridX(cf.columnX);
@@ -275,12 +320,109 @@ const casefileScreen = {
     pop();
     if (this.stamp) drawStamp(this.stamp);
 
-    // The print status (nothing until printing starts)
-    const state = this.printState();
-    if (state !== 'waiting') PrintStatus(state, x, t.printStatus.y, ms, w);
+    // Fading away: a see-through black layer over the column
+    if (away > 0) {
+      push();
+      noStroke();
+      fill(0, 255 * away);
+      rect(x - t.space.l, t.topBar.height, CONFIG.stage.width - x + t.space.l, CONFIG.stage.height - t.topBar.height);
+      pop();
+    }
+  },
 
-    // GOODBYE: the officer peeks in, just before we go back to the start
-    const g = cf.goodbye;
+  // ---- THE PRINT WAIT: the printer, the page coming out, the progress ----
+  drawPrintWait(ms) {
+    const t = CONFIG.ui.tokens;
+    const pw = t.printWait;
+    const c = CONFIG.ui.colors;
+    const T = this.times;
+    const since = ms - T.print; // ms since printing started
+
+    // 0–2 s: the case file shrinks away to the left (fast, then slower)
+    const s = constrain(since / CONFIG.ui.timing.printWait.shrinkMs, 0, 1);
+    const ease = 1 - pow(1 - s, 3);
+    this.drawLayout(ms, ease);
+
+    // "PRINTING YOUR CASE FILE…", typed in at the top
+    push();
+    noStroke();
+    fill(c.text);
+    setType('title');
+    textAlign(CENTER, BASELINE);
+    text('PRINTING YOUR CASE FILE…'.substring(0, max(0, floor(since / CONFIG.ui.timing.typewriterMs))), CONFIG.stage.width / 2, pw.titleBaseline);
+    pop();
+
+    // How far the printing is: 0 -> 1 (the page comes out after the first 2 s)
+    const k = constrain((ms - T.pageFrom) / (T.printDone - T.pageFrom), 0, 1);
+    const printing = k > 0 && k < 1;
+    const secs = since / 1000;
+
+    // The printer rises into the middle during the first 2 s
+    const rise = (1 - ease) * (CONFIG.stage.height - pw.printer.slotY);
+    const slotY = pw.printer.slotY + rise;
+    const shake = printing ? pw.shake.px * sin(secs * pw.shake.hz * TWO_PI) : 0;
+    const jiggle = printing ? pw.feed.px * sin(secs * pw.feed.hz * TWO_PI) : 0;
+
+    // The printer, with the page coming out of it (in front of its paper
+    // tray, behind its black body, which hides the part still inside)
+    DoodlePrinter(pw.printer.cx, slotY, shake, () => {
+      if (this.pageImg) EmergingPage(this.pageImg, pw.printer.cx, slotY, pw.page.w, k, jiggle);
+    });
+
+    // The progress bar and the time left (once the printer is in place)
+    if (s >= 1) {
+      PrintProgress(pw.printer.cx, pw.progress.y, k);
+      const left = ceil((T.printDone - ms) / 1000);
+      push();
+      noStroke();
+      fill(c.muted);
+      setType('label');
+      textAlign(CENTER, BASELINE);
+      text(left > 0 ? '~' + left + ' s left' : 'done', pw.printer.cx, pw.leftBaseline);
+      pop();
+    }
+
+    // DONE!: the stamp on the finished page, on top of everything
+    if (this.doneStamp && ms >= T.printDone) drawStamp(this.doneStamp);
+  },
+
+  // ---- THE FINAL CASE FILE (after printing): the SAME layout as after the
+  // reveal (drawLayout), growing back from the left, + "Collect your case file" ----
+  drawFinal(ms) {
+    const t = CONFIG.ui.tokens;
+    const k = constrain((ms - this.times.final) / CONFIG.ui.timing.printWait.growMs, 0, 1);
+    this.drawLayout(ms, pow(1 - k, 3)); // away: 1 -> 0, fast, then slowing down (ease-out)
+    if (k < 1) return;
+    // "Collect your case file / from the printer" + a big doodle arrow
+    // towards the real printer's side of the booth (CONFIG.print.printerSide)
+    const col = t.casefile.collect;
+    const toLeft = CONFIG.print.printerSide === 'left';
+    const lines = ['Collect your case file', 'from the printer'];
+    push();
+    noStroke();
+    fill(CONFIG.ui.colors.text);
+    setType(col.text);
+    // Printer on the right: from the column's left edge. On the left:
+    // right-aligned to the margin, so the arrow (before the text) stays clear of the poster.
+    const edge = toLeft ? CONFIG.stage.width - t.layout.margin : gridX(t.casefile.columnX);
+    textAlign(toLeft ? RIGHT : LEFT, BASELINE);
+    lines.forEach((line, i) => text(line, edge, col.baselines[i]));
+    const lastW = textWidth(lines[1]);
+    const capH = drawingContext.measureText('H').actualBoundingBoxAscent;
+    pop();
+    // The arrow's tail sits next to the end of "from the printer", pointing outwards
+    const A = t.arrow;
+    const since = ms - (this.times.final + CONFIG.ui.timing.printWait.growMs); // ms since it appeared
+    const tailX = toLeft ? edge - lastW - col.arrowGap : edge + lastW + col.arrowGap;
+    DoodleArrow(tailX, col.baselines[1] - capH / 2, toLeft ? 'left' : 'right', {
+      progress: since / A.drawMs, // draws on once...
+      nudge: since > A.drawMs ? arrowNudge(since - A.drawMs) : 0, // ...then nudges towards the printer
+    });
+  },
+
+  // ---- GOODBYE: the officer peeks in, just before we go back to the start ----
+  drawGoodbye() {
+    const g = CONFIG.ui.tokens.casefile.goodbye;
     const since = millis() - (this.leaveAt() - g.showMs); // ms since the goodbye started
     if (autoAdvance && since >= 0) {
       const s = constrain(since / g.slideMs, 0, 1);
@@ -294,16 +436,31 @@ const casefileScreen = {
 
   keyPressed() {
     if (key === ' ') {
-      // Skip the reveal: straight to the finished case file (the AT LARGE
-      // stamp slams on, then it prints, still only once). Already there: back to the start.
-      if (!collage || this.ms() >= this.times.stamp) {
+      // SPACE skips to the next part:
+      //   the reveal       -> the finished case file (AT LARGE slams on)
+      //   printing         -> DONE! (it still prints, once)
+      //   DONE!            -> the final case file
+      //   final case file  -> the goodbye;  the goodbye -> back to the start
+      const ms = this.ms();
+      const T = this.times;
+      const jumpTo = (at) => (this.enteredAt = millis() - at); // the screen's clock now says 'at'
+      if (!collage) {
         goTo('welcome');
-      } else {
+      } else if (ms < T.stamp) {
         stopDoodleAnimation();
         stopSfx('pencil', 0);
-        this.enteredAt = millis() - this.times.stamp;
+        setMusicLevel(CONFIG.music.casefile.flash, CONFIG.music.casefile.swellMs); // the swell we skipped to
+        jumpTo(T.stamp);
         // The cues we jumped over: done, silently (the stamp cue is next)
-        for (const cue of this.cues) if (cue.at < this.times.stamp) cue.done = true;
+        for (const cue of this.cues) if (cue.at < T.stamp) cue.done = true;
+      } else if (ms < T.printDone) {
+        jumpTo(T.printDone); // (the 'print' cue still runs: it prints, once)
+      } else if (ms < T.final) {
+        jumpTo(T.final);
+      } else if (ms < T.goodbye) {
+        jumpTo(T.goodbye);
+      } else {
+        goTo('welcome');
       }
       return false;
     }
@@ -314,5 +471,7 @@ const casefileScreen = {
 
   exit() {
     stopDoodleAnimation();
+    if (this.pageImg) this.pageImg.remove(); // the small page copy
+    this.pageImg = null;
   },
 };

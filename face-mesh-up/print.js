@@ -113,14 +113,17 @@ function printFileName(r) {
 
 // ---------- the page ----------
 
-// parts: the collage's parts (lines, stickers, plans); number: the case number
-function makePrintImage(parts, number) {
+// parts: the collage's parts (lines, stickers, plans); number: the case number;
+// dpi (optional): the resolution (default CONFIG.print.dpi; the 06 screen
+// draws a small copy at tokens.printWait.page.dpi)
+function makePrintImage(parts, number, dpi) {
   const P = CONFIG.print;
   const L = P.layout;
   const paper = PAPER_SIZES[P.paper];
-  const W = round(paper.w * P.dpi); // 8.5 in x 300 dpi = 2550 px
-  const H = round(paper.h * P.dpi); // 11 in x 300 dpi = 3300 px
-  const k = P.dpi / 72; // points -> print pixels
+  dpi = dpi || P.dpi;
+  const W = round(paper.w * dpi); // 8.5 in x 300 dpi = 2550 px
+  const H = round(paper.h * dpi); // 11 in x 300 dpi = 3300 px
+  const k = dpi / 72; // points -> print pixels
 
   const g = createGraphics(W, H);
   g.pixelDensity(1);
@@ -191,19 +194,19 @@ function drawPrintComposite(g, parts, k) {
   const L = CONFIG.print.layout;
 
   // ---- 1. How big is the drawing? (in collage pixels) ----
-  // The box around every line point and every piece. The neck lines are
-  // lines[1] and lines[2] (collageDoodle.js): where they end = the bottom.
+  // The box around every line point and every piece. The neck lines (role
+  // 'neck', collageDoodle.js): where they end = the bottom.
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let neckEnd = -Infinity;
-  parts.lines.forEach(function (line, i) {
+  parts.lines.forEach(function (line) {
     for (const stroke of line.main) {
       for (const p of stroke.points) {
         minX = min(minX, p.x);
         maxX = max(maxX, p.x);
         minY = min(minY, p.y);
-        if (i === 1 || i === 2) neckEnd = max(neckEnd, p.y);
+        if (line.role === 'neck') neckEnd = max(neckEnd, p.y);
       }
     }
   });
@@ -273,7 +276,7 @@ function drawPrintComposite(g, parts, k) {
 // ---------- a stand-in (no photo yet) ----------
 
 // A made-up composite with the same parts as a real one (collageDoodle.js):
-// a head, two neck lines (lines[1] and [2]), hair, and three plain pieces.
+// a head, two neck lines (role 'neck'), hair, and three plain pieces.
 // For checking the print layout in the style guide without a photo.
 // (Free it when done: for each sticker, s.img.remove())
 function makeStandInParts() {
@@ -285,7 +288,7 @@ function makeStandInParts() {
   const neckR = [{ x: 1000, y: 1520 }, { x: 1010, y: 1800 }, { x: 1015, y: 1950 }];
   const hair = [];
   for (let i = 0; i <= 8; i++) hair.push({ x: 420 + i * 95, y: i % 2 === 0 ? 520 : 300 });
-  const line = (pts) => ({ main: penStrokes(resample(pts, 4), weight), light: null });
+  const line = (pts, role) => ({ main: penStrokes(resample(pts, 4), weight), light: null, role: role });
   const pieces = [
     { w: 140, h: 240, x: 340, y: 980, c: 0 }, // an ear
     { w: 360, h: 140, x: 800, y: 1260, c: 1 }, // lips
@@ -301,7 +304,7 @@ function makeStandInParts() {
   });
   const lineColour = color(CONFIG.doodle.line.color);
   return {
-    lines: [line(head), line(neckL), line(neckR), line(hair)],
+    lines: [line(head, 'head'), line(neckL, 'neck'), line(neckR, 'neck'), line(hair, 'hair')],
     lineColour: lineColour,
     lightColour: lineColour,
     stickers: stickers,

@@ -141,6 +141,7 @@ function soundUnlocked() {
 // The master knob: CONFIG.sound.master, or 0 when muted
 function applyMaster() {
   if (masterGain) masterGain.gain.value = sfxMuted ? 0 : CONFIG.sound.master;
+  applyMusicVolume(); // music.js: mute silences the music too
 }
 
 function toggleMute() {
@@ -221,6 +222,8 @@ function playSfx(name, options) {
     gain.gain.setValueAtTime(gain.gain.value, end - fade);
     gain.gain.linearRampToValueAtTime(0, end);
   }
+  // An important sound (CONFIG.music.duck.sounds): the music steps back while it plays
+  if (CONFIG.music.duck.sounds.includes(name)) musicDuck(play.startedAt, play.startedAt + play.duration); // music.js
   sfxPlays[name] = play;
   return play;
 }
@@ -254,6 +257,12 @@ function speakAloud(words, delayMs, volume) {
     u.volume = constrain(CONFIG.sound.master * (volume ?? 1), 0, 1);
     const voice = speechSynthesis.getVoices().find((v) => v.name === s.voiceName);
     if (voice) u.voice = voice;
+    // The music steps back while he speaks (music.js)
+    if (CONFIG.music.duck.voice) {
+      let w = null;
+      u.onstart = () => (w = musicDuck(audioCtx ? audioCtx.currentTime : 0, Infinity));
+      u.onend = u.onerror = () => musicDuckEnd(w);
+    }
     speechSynthesis.speak(u);
     logSfx('voice "' + words + '"', 'speech', 0);
   }, delayMs || 0);
@@ -396,7 +405,7 @@ function stopAllSfx(fadeMs) {
 const SYNTHS = {
   // A "whoop" siren: a pure tone gliding 600 -> 1200 -> 600 Hz, again and again
   siren(ctx, out, when, o) {
-    const seconds = (o.length ?? 2200) / 1000;
+    const seconds = max(0.05, (o.length ?? 2200) / 1000); // (never zero or negative)
     const tone = ctx.createOscillator();
     tone.type = 'sine';
     const cycle = 0.6; // one up-and-down, in seconds
@@ -472,7 +481,7 @@ const SYNTHS = {
 
   // Radio / walkie-talkie static: noise in the "radio" range, crackling
   static(ctx, out, when, o) {
-    const seconds = (o.length ?? 300) / 1000;
+    const seconds = max(0.05, (o.length ?? 300) / 1000); // (never zero or negative)
     const noise = noiseSource(ctx, seconds);
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
@@ -486,6 +495,33 @@ const SYNTHS = {
   },
 
   // A radio blip: two short beeps, low then high
+  // A bright "ding": two sine tones (a bell's note and a higher overtone), ringing out
+  ding(ctx, out, when) {
+    const nodes = [];
+    // [pitch, how loud, how long it rings]: the note (G6) and an overtone an octave up
+    [[1568, 1, 0.9], [3136, 0.4, 0.4]].forEach(function ([hz, level, ring]) {
+      const tone = ctx.createOscillator();
+      tone.type = 'sine';
+      tone.frequency.value = hz;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(level, when + 0.005); // a sharp strike...
+      g.gain.exponentialRampToValueAtTime(0.0001, when + ring); // ...ringing out
+      tone.connect(g).connect(out);
+      tone.start(when);
+      tone.stop(when + ring + 0.02);
+      nodes.push(tone);
+    });
+    return { nodes: nodes, duration: 0.9 };
+  },
+
+  // An alarm double-beep: two short square-wave beeps (ALL 3 FOUND)
+  alarm(ctx, out, when) {
+    const a = beepTone(ctx, out, when, 1240, 0.06, 'square');
+    const b = beepTone(ctx, out, when + 0.09, 1240, 0.06, 'square');
+    return { nodes: [a, b], duration: 0.16 };
+  },
+
   blip(ctx, out, when) {
     const a = beepTone(ctx, out, when, 1000, 0.06, 'sine');
     const b = beepTone(ctx, out, when + 0.08, 1500, 0.07, 'sine');
@@ -566,7 +602,7 @@ const SYNTHS = {
 
   // Pencil on paper: high, thin noise whose loudness jitters (the strokes)
   scratch(ctx, out, when, o) {
-    const seconds = (o.length ?? 700) / 1000;
+    const seconds = max(0.05, (o.length ?? 700) / 1000); // (never zero or negative)
     const noise = noiseSource(ctx, seconds);
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';

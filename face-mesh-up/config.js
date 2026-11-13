@@ -76,7 +76,16 @@ const CONFIG = {
       spacing: 6, // a point every 6 px along each line
       doublePass: true, // go over every line a second time, lighter and slightly shifted
     },
-    hairStyle: "random", // 'random' | 'spikes' | 'loops' | 'flat' | 'none'  (key T)
+    // Hair (hair.js): 'random' or a style name: spikes, curly, fringe, ponytail,
+    // topBun, pigtails, afro, bob, long, quiff, none  (key T cycles them)
+    hairStyle: "random",
+    // 'random' picks with these weights (1 = equal; 0 = never), never the same style twice in a row
+    hairWeights: { spikes: 1, curly: 1, fringe: 1, ponytail: 1, topBun: 1, pigtails: 1, afro: 1, bob: 1, long: 1, quiff: 1, mohawk: 1, threeHairs: 1 },
+    hairExtras: false, // true = also the extras: mohawk, threeHairs
+    // Front hair stops browMargin above the brows; the open head line stops templeAbove
+    // higher (the hairline, where the hair takes over). Both x head height.
+    hairRules: { browMargin: 0.04, templeAbove: 0.03 },
+    drawEars: true, // small open ear loops on the doodle head (the photo ear pieces go on top)
     head: {
       top: 0.12, // where the top of the head sits: 0 = top of page, 1 = bottom
       height: 0.6, // how much of the page height the head takes up
@@ -233,6 +242,7 @@ const CONFIG = {
         label: { size: 18, line: 24, track: 0.04, font: "mono" },
         body: { size: 24, line: 32, track: 0, font: "code" }, // Fira Code
         lead: { size: 32, line: 40, track: 0, font: "code" }, // Fira Code
+        leadLarge: { size: 40, line: 48, track: 0, font: "code" }, // one step up from lead (Fira Code): "Collect your case file…"
         title: { size: 48, line: 56, track: 0.01, font: "display" },
         headline: { size: 72, line: 80, track: 0.01, font: "display" },
         hero: { size: 120, line: 128, track: 0.01, font: "display" },
@@ -253,7 +263,10 @@ const CONFIG = {
       pageDot: { diameter: 40, gap: 24, stroke: "hairline", wobble: "subtle", label: "label", ends: { gap: 12, at: 30 } },
       keyHint: { height: 40, padX: 16, stroke: "hairline", wobble: "subtle", label: "label" },
       frame: { stroke: "ui", wobble: "ui", ends: { overshoot: 8 } },
-      poster: { S: [240, 336], M: [400, 560], L: [640, 896], roughness: 6, fibre: 4, angles: [-3, 2, -2] },
+      // Torn posters, [w, h]. XL = "posterLarge": the 01 WANTED posters, ~74% of the stage
+      // height (same 5:7 shape as the others). Three of them + gaps fill the width; any
+      // bigger and their tilted corners would overlap.
+      poster: { S: [240, 336], M: [400, 560], L: [640, 896], XL: [568, 795], roughness: 6, fibre: 4, angles: [-3, 2, -2] },
       stamp: { S: 32, M: 48, L: 72, stroke: "emphasis", wobble: "ui", angle: -6, padX: 24, padY: 8, ends: { overshoot: 8 } },
       placard: { w: 320, h: 96, stroke: "hairline", wobble: "subtle", ends: { gap: 8 } },
       gridCell: { w: 320, h: 176, gap: 16, stroke: "ui", lockedStroke: "emphasis", wobble: "ui", ends: { overshoot: 8 }, idleAlpha: 0.5, clearedAlpha: 0.25 },
@@ -268,13 +281,45 @@ const CONFIG = {
         floorMarkY: 856, // the middle of the floor marks
         posterY: 520, // the middle of the WANTED posters
       },
-      floorMark: { diameter: 96, stroke: "ui", wobble: "ui", label: "numeral", ends: { gap: 16, at: 30 } },
-      badge: { diameter: 56, stroke: "ui", wobble: "subtle", label: "numeral", ends: { gap: 12, at: 30 } },
+      // A floor mark: a doodle rectangle (filled black, chalk-white outline, so it shows on
+      // the blue floor), "01" / "02" / "03" in mono in the person colour
+      floorMark: { w: 192, h: 88, stroke: "ui", wobble: "ui", label: "numeral", ends: { overshoot: 8 } },
+      // Screen 00, welcome: where everything sits (the chalk figures keep their own tokens)
+      welcome: {
+        bandY: 568, // the middle of the torn red band (with the chalk figures on it)
+        badgeY: 208, // the "3 PEOPLE PER ROUND" badge, right half of the grid (column 9)
+        // The figures + the blue floor + the yellow leg outlines: ONE picture (985 x 453,
+        // transparent outside AND inside the figures, so the band shows through).
+        // Placed so the top edge of its floor (floorTop, in picture px) sits in the middle
+        // of the band's bottom edge, tilted with the band; 'scale' from page_00_ref.png.
+        figures: { file: "assets/welcome/figures.png", scale: 1.095, floorTop: { x: 485, y: 307 } },
+        // Shift+R: the reference (assets/reference/page_00_ref.png) on top at 50%,
+        // placed so its top bar lines up with ours: stage = ref px x scale + (x, y)
+        ref: { file: "assets/reference/page_00_ref.png", scale: 1.123, x: -43, y: 4, alpha: 0.5 },
+        markY: 868, // the middle of the floor marks (x: screen.slotX, under each figure)
+        instructionBaseline: 1032, // "Step onto the three marks on the floor to begin!" (body, 24 px), centred
+        pulseMs: 2000, // the instruction's gentle pulse: 100% -> 60% -> 100% in this time
+        pulseMin: 0.6,
+        // Live feedback: someone steps onto a mark (a face in that third of the camera)
+        lightMs: 200, // the mark fills with the person's colour in this time (and empties again)
+        goAfterMs: 1000, // all 3 faces have been there this long -> 01 wanted (one or two: wait)
+      },
+      badge: { diameter: 72, stroke: "ui", wobble: "subtle", number: "title", label: "label", ends: { gap: 12, at: 30 } }, // the "3": display font; the words: mono
       band: { h: 320, angle: -2 }, // the torn red band on the welcome screen
       // Chalk body outlines: drawn on, held, faded out, again (a loop)
       chalkFigure: { scale: 0.7, stroke: "ui", wobble: "ui", angles: [-84, 96, -92], drawMs: 4000, holdMs: 3000, fadeMs: 1000, staggerMs: 600 },
       // What's ON a poster: the headline style per poster size, the face photo
-      wantedPoster: { headline: { S: "title", M: "headline", L: "hero" }, photoInset: 8 },
+      // What's ON a poster, per poster size: the WANTED headline, the "SUSPECT 0X" / "No." text,
+      // and the padding (a space token). Everything grows with the poster.
+      wantedPoster: {
+        headline: { S: "title", M: "headline", L: "hero", XL: "hero" },
+        text: { S: "label", M: "label", L: "label", XL: "lead" },
+        pad: { S: "xl", M: "xl", L: "xl", XL: "xxl" },
+        photoInset: 8,
+      },
+      // Screen 01: the three big posters (size XL), centred as a group, 'gap' apart;
+      // the FOUND stamps (size L, ink) on each poster's photo when all 3 are found
+      wanted: { size: "XL", gap: 40, cy: 596, stamp: { size: "L", dy: 170 } }, // stamp dy: on the lower part of the photo (not the eyes)
       faceCrop: { margin: 0.35, smoothing: 0.25 }, // photo = face box + 35% each side; follows the face smoothly
 
       // Screen 02, Hands Up: layout and timing
@@ -385,7 +430,36 @@ const CONFIG = {
       soundOff: { y: 144 }, // the SOUND OFF label (right-aligned to the margin), under the top bar
       // The sound log (Shift+L, for testing): the last sounds played, bottom-left
       soundLog: { lines: 8, w: 640, lineH: 20, padX: 16, padY: 12, backdrop: 0.85, stroke: "hairline", wobble: "subtle", ends: { gap: 8 }, text: "caption" },
-      soundButton: { w: 288, h: 80, gap: 24, stroke: "hairline", wobble: "subtle", ends: { gap: 8 } },
+      soundButton: { w: 264, h: 80, gap: 24, stroke: "hairline", wobble: "subtle", ends: { gap: 8 } },
+      // Style guide page 12: the hairstyles, 5 x 2 per head shape (two blocks side by side)
+      // Style guide pages 12 + 13: the hairstyles, one row per style; 3 seeds on the
+      // normal head, then the same 3 seeds on a wider head (6 columns)
+      hairSheet: { top: 192, cellW: 288, cellH: 168, scale: 0.12, neckLength: 0.25, seeds: [11, 22, 33], refAlpha: 0.3, stroke: "ui" },
+      // DoodleArrow: a curved shaft + a two-stroke arrowhead (like two quick marker lines)
+      arrow: {
+        large: 300, // the big arrow's length (px)
+        stroke: "emphasis",
+        wobble: "ui",
+        drop: 0.36, // it points this much down for every 1 across (towards a printer below)
+        bend: 0.07, // how much the shaft curves (x length)
+        head: 0.2, // the arrowhead's strokes: this long (x length)...
+        headAngle: 32, // ...at this angle to the shaft (degrees)
+        drawMs: 500, // it draws on in this time
+        nudgePx: 12, // then a gentle nudge forwards and back...
+        nudgeMs: 400, // ...taking this long...
+        nudgeEveryMs: 1500, // ...every this often
+      },
+      // Screen 06: the PRINT WAIT (while the printer works). Times: CONFIG.ui.timing.printWait
+      printWait: {
+        titleBaseline: 184, // "PRINTING YOUR CASE FILE…" (title), centred, types in
+        poster: { cx: 336, cy: 600, scale: 0.6 }, // the case file poster, shrunk into the left third
+        printer: { cx: 960, slotY: 648, w: 520, h: 176, stroke: "ui", wobble: "ui", ends: { overshoot: 8 } }, // the doodle printer: middle, the paper slot's y, body size
+        page: { w: 312, dpi: 48 }, // the page coming out: width on screen (Letter shape); drawn at this dpi
+        progress: { y: 872, w: 520, h: 24, stroke: "hairline", wobble: "subtle", ends: { gap: 8 } }, // the bar under the printer...
+        leftBaseline: 936, // ..."~32 s left" (label) under it
+        shake: { px: 1.5, hz: 14 }, // the printer's gentle shake while it prints
+        feed: { px: 3, hz: 1.5 }, // the page's little paper-feed jiggle
+      },
       // Screen 06: the print status in the right column of the case file
       printStatus: {
         y: 800, // its top on the stage (x: the case file's column; the words wrap to the column)
@@ -440,6 +514,11 @@ const CONFIG = {
         marker: { cx: 1760, cy: 220, w: 104, h: 120 }, // the evidence marker "3"
         recipe: { y: 376, step: 64, rule: 16 }, // "base face   person/ 03" rows: first baseline, row step, rule under the text
         statusBaseline: 728, // "Status:" + the AT LARGE stamp
+        // After printing: "Collect your case file / from the printer" (leadLarge, two lines) under the
+        // status, and a big DoodleArrow from the end of the text towards the printer's side
+        // (printerSide 'right': text from the column's left, arrow after it; 'left': text right-aligned
+        // to the margin, arrow before it, pointing left, clear of the poster)
+        collect: { baselines: [864, 912], text: "leadLarge", arrowGap: 32 },
         stampGap: 56, // between "Status:" and the stamp (room for its tilt and slam)
         // The goodbye: the officer peeks in from the corner (like in 02b), then -> welcome
         goodbye: { showMs: 3000, slideMs: 400, slideFrom: 360, officerX: 1768, officerFeetY: 1208, scale: 0.6, bubbleRight: 1560, bubbleY: 984 },
@@ -519,6 +598,12 @@ const CONFIG = {
         flashMs: 400, // ...a camera flash (white-out, fading), and the full case file + AT LARGE
         printDelayMs: 800, // then printing starts
       },
+      // 06 after the reveal: the poster shrinks to the left while "PRINTING…" types (shrinkMs), the page
+      // comes out (print.printMs), "DONE!" on the page (doneMs), then the full case file grows back (growMs)
+      printWait: { shrinkMs: 2000, doneMs: 1500, growMs: 600 },
+      // 01 "ALL 3 FOUND": the posters blink (on / off, 'blinks' times), then a FOUND stamp
+      // slams onto each, left -> right, stampGapMs apart; holdMs later -> 02a
+      found: { blinks: 3, onMs: 120, offMs: 120, stampGapMs: 150, holdMs: 800 },
       casefileMs: 20000, // the case file stays this long, then back to the start (longer after printing: print.collectMs)
       arrivalMs: 5000, // scene 02a: the police car arrives, then the live camera (02b)
       forgeryMs: 4300, // scene 05: the bandits' comic interlude, then the case file
@@ -538,7 +623,8 @@ const CONFIG = {
     sounds: {
       // name:     { file (in assets/sfx/),            volume, synthFallback (a SYNTHS name) }
       ambience: { file: "assets/sfx/ambience.mp3", volume: 0.15, synthFallback: "ambience" }, // 00, very quiet city (off: see ambienceOn)
-      click: { file: "assets/sfx/click.mp3", volume: 0.5, synthFallback: "click" }, // 01, a poster fills with a face
+      click: { file: "assets/sfx/click.mp3", volume: 0.5, synthFallback: "click" }, // 01, a poster fills with a face (once per person per round)
+      allFound: { file: "assets/sfx/all_found.mp3", volume: 0.45, synthFallback: "alarm" }, // 01, ALL 3 FOUND: one per blink
       siren: { file: "assets/sfx/siren.mp3", volume: 0.35, synthFallback: "siren" }, // 02a, the car drives in
       screech: { file: "assets/sfx/screech.mp3", volume: 0.5, synthFallback: "screech" }, // 02a, the car stops
       handsup: { file: "assets/sfx/handsup.mp3", volume: 0.9, synthFallback: "megaphone" }, // 02a, "POLICE! hands up"
@@ -556,6 +642,7 @@ const CONFIG = {
       pencil: { file: "assets/sfx/pencil.mp3", volume: 0.5, synthFallback: "scratch" }, // 05, bandit 01 scribbles
       scissors: { file: "assets/sfx/scissors.mp3", volume: 0.5, synthFallback: "snip" }, // 05, a double snip
       paste: { file: "assets/sfx/paste.mp3", volume: 0.6, synthFallback: "pat" }, // 06 reveal, a piece lands
+      ding: { file: "assets/sfx/ding.mp3", volume: 0.5, synthFallback: "ding" }, // 06, DONE! (the page is printed)
       whoosh: { file: "assets/sfx/whoosh.mp3", volume: 0.5, synthFallback: "whoosh" }, // 05, the bandits run off
     },
     ambienceOn: false, // 00: play the quiet city ambience on the welcome screen
@@ -571,6 +658,7 @@ const CONFIG = {
       fadeMs: 1500, // ...over this long. FREEZE! stops it (if still playing).
     },
     staticBeforeLineMs: 250, // 02b: a walkie-talkie burst this long, then the new line types
+    restampVolume: 0.5, // 06: the AT LARGE stamp slams again on the final case file, quieter (x its volume)
     // 03: the camera snap (sounds.shutter: file + volume). While it plays, every
     // other sound is turned down to duckTo for duckMs, so nothing covers it.
     shutter: { duckTo: 0.3, duckMs: 300 },
@@ -593,6 +681,33 @@ const CONFIG = {
     },
   },
 
+  // ---------------------------------------------------------------
+  // MUSIC (music.js): "Game Over", 3:13, 88 BPM, looped under the whole story.
+  // It has its OWN volume (not the sound effects' master): the track is about
+  // 13 dB louder than the effects, so it starts low. U mutes it too.
+  music: {
+    file: "assets/music/game_over.mp3",
+    on: true, // Shift+M: music on / off ("MUSIC OFF" label)
+    volume: 0.3, // the base volume, 0 – 1
+    restartEachRound: false, // false = it just keeps playing across screens and rounds
+    // The loop: back to loopStart BEFORE the fade-out at the end (from ~3:08).
+    // 187.5 s = exactly 275 beats at 88 BPM.
+    loopStart: 0,
+    loopEnd: 187.5,
+    crossfadeMs: 1364, // = 2 beats at 88 BPM (60 / 88 x 2), so the beat doesn't stumble
+    jumpBeforeLoop: 6, // sound test "loop point": start this many seconds before the crossfade
+    levelFadeMs: 600, // changes of level fade over this long
+    // The level per screen: 0 – 1, times the base volume
+    levels: { welcome: 1.0, wanted: 0.9, arrival: 0.35, handsup: 0.35, mugshot: 0.5, evidence: 0.3, forgery: 0.8, casefile: 0.2, styleguide: 1.0 },
+    // 03: down when the countdown starts, silent just before the snap, back after the flash
+    mugshot: { countdown: 0.1, silenceMs: 500, silenceFadeMs: 150, afterFlash: 0.5 },
+    // 06: low during the dim + reveal (levels.casefile), a swell at the flash, then printing
+    casefile: { flash: 0.9, swellMs: 400, printing: 0.7, printingFadeMs: 1500, final: 0.9 }, // final: the full case file again, after printing
+    // Ducking: while one of these plays (or the officer speaks), the music goes
+    // down to 'to' (x its level), fast (attackMs), and back up slowly (releaseMs)
+    duck: { to: 0.5, attackMs: 80, releaseMs: 400, sounds: ["handsup", "radio", "stamp", "shutter"], voice: true },
+  },
+
   // The printed case file (screen 06), on US Letter paper. It prints by
   // itself once the reveal has finished, once per photo. See print.js, and
   // the README for how to print without a dialog (Chrome --kiosk --kiosk-printing).
@@ -603,7 +718,12 @@ const CONFIG = {
     // with the paper / colour settings in CONFIG.printer (it also keeps a copy in
     // the prints/ folder). 'browser' = window.print() (the dialog).
     method: "server",
-    printingMs: 4000, // "PRINTING YOUR CASE FILE…" shows this long, then "Collect your case file…"
+    printingMs: 4000, // (the small PrintStatus icon's "printing" time; the 06 screen now uses printMs)
+    // The browser can't know when the printer is really done, so the 06 screen
+    // shows a waiting animation for an ESTIMATED time (tune it to the printer):
+    printMs: 30000, // printing on (auto: true): how long printing takes
+    previewMs: 8000, // printing off (auto: false): the same animation, shorter, for testing
+    printerSide: "right", // where the real printer stands in the booth: "Collect your case file →" points there ('left' | 'right')
     collectMs: 15000, // after printing, the screen waits at least this long before going back to the start
     paper: "Letter", // US Letter portrait, 8.5 x 11 in (sizes: PAPER_SIZES in print.js)
     dpi: 300, // 8.5 x 11 in at 300 dpi = 2550 x 3300 px

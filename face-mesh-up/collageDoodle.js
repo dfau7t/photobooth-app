@@ -41,20 +41,31 @@ function composeDoodle(snap, people, recipe) {
   const toPage = page.toPage;
   const paths = makeDoodlePaths(base, toPage);
 
-  // Hair: pick a style and remember it in the recipe, so the panel can show it
-  recipe.hair = pickHairStyle();
-  const hair = hairPath(recipe.hair, paths.head);
+  // Hair (hair.js): the style for this recipe (kept in it, so the panel and
+  // the debug overlay can show it), placed around THIS head
+  recipe.hair = pickHairStyle(recipe);
+  const hairHead = hairHeadFromFace(paths.head, base, toPage);
+  const hair = hairPaths(recipe.hair, hairHead);
+  // The head line: OPEN at the hairline when the hair forms the top of the
+  // head (the redrawn styles), otherwise the whole oval
+  const headLine = hairOpensHead(recipe.hair) ? handDrawn(openHeadLine(hairHead), { sharp: true }) : handDrawn(paths.head, { closed: true });
+  const hairLines = (layer) => hair.filter((h) => h.layer === layer).map((h) => ({ points: handDrawn(h.points, { sharp: h.sharp, closed: h.closed }), role: 'hair' }));
 
   // ---- Make every path hand-drawn (see pen.js) ----
-  // In drawing order: head, neck, nose, hair.
-  // noseMode: 'piece' = photo nose only, 'line' = drawn nose only, 'both'
-  const lines = [
-    handDrawn(paths.head, { closed: true }),
-    handDrawn(paths.neckLeft, {}),
-    handDrawn(paths.neckRight, {}),
-  ];
-  if (cfg.noseMode !== 'piece') lines.push(handDrawn(paths.nose, {}));
-  if (hair) lines.push(handDrawn(hair.points, { sharp: hair.sharp }));
+  // In drawing order: hair BEHIND the head (long hair, tails, afro), the
+  // head, the ears, the neck, the nose, then hair IN FRONT (fringes, curls).
+  // Each line has a role ('hair', 'head', 'neck', 'nose'): print.js finds
+  // the neck lines by it. noseMode: 'piece' = photo nose only, 'line' = drawn nose only, 'both'
+  const entries = hairLines('behind').concat([{ points: headLine, role: 'head' }]);
+  // The ears: small open loops at the sides (the photo ear pieces go on top)
+  if (cfg.drawEars) for (const ear of doodleEars(hairHead)) entries.push({ points: handDrawn(ear, {}), role: 'ear' });
+  entries.push(
+    { points: handDrawn(paths.neckLeft, {}), role: 'neck' },
+    { points: handDrawn(paths.neckRight, {}), role: 'neck' }
+  );
+  if (cfg.noseMode !== 'piece') entries.push({ points: handDrawn(paths.nose, {}), role: 'nose' });
+  entries.push(...hairLines('front'));
+  const lines = entries.map((e) => e.points);
 
   // ---- Cut every line into pen strokes (see pen.js) ----
   // Second pen pass: like a marker going over the same line twice. The same
@@ -62,8 +73,8 @@ function composeDoodle(snap, people, recipe) {
   // paper to line). It's drawn UNDER the main line, so only a thin edge shows.
   const lineColour = color(cfg.line.color);
   const lightColour = lerpColor(color(cfg.paper), lineColour, 0.4);
-  const strokeLines = lines.map(function () {
-    return { light: null, main: null };
+  const strokeLines = entries.map(function (e) {
+    return { light: null, main: null, role: e.role };
   });
   if (cfg.line.doublePass) {
     const shift = p5.Vector.fromAngle(random(TWO_PI), random(2, 3));
@@ -114,8 +125,8 @@ function composeDoodle(snap, people, recipe) {
     stickers: stickers,
     overlay: overlay,
     // For the print (print.js): the pieces' plans, so they can be cut again
-    // at print resolution. Same order as 'stickers'. (lines[1] and lines[2]
-    // are the two neck lines: the print stands them on its "100" rule.)
+    // at print resolution. Same order as 'stickers'. (The two lines with role 'neck'
+    // are the neck lines: the print stands them on its "100" rule.)
     plans: DRAW_ORDER.flatMap((feature) => plans.filter((p) => p.feature === feature)),
   };
   return g;

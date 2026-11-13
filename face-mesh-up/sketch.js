@@ -105,7 +105,9 @@ function startNewRound() {
     // A random 8-digit booking number per person, e.g. "48213907"
     bookingNumbers: [0, 1, 2].map(() => nf(floor(Math.random() * 1e8), 8)),
     radioStarted: false, // the police radio has been played this round (02a / 02b)
+    clicked: [false, false, false], // 01: the camera click has played for this poster this round
   };
+  if (CONFIG.music.restartEachRound && music.started) startMusicAt(CONFIG.music.loopStart); // music.js
 }
 
 // ---------- p5 setup ----------
@@ -114,6 +116,7 @@ function preload() {
   // ml5 needs the model to be loaded here, before setup()
   loadFaceModels(); // one face detector per zone (see faces.js)
   preloadSfx(); // sound.js: fetch the sound files (missing ones: the synth plays)
+  preloadMusic(); // music.js: fetch the background music (in the background)
 }
 
 function setup() {
@@ -183,6 +186,7 @@ function draw() {
   }
 
   // The current screen: first its logic, then its drawing
+  updateMusic(); // music.js: start after the sound unlock, the loop, ducking
   currentScreen.update();
   currentScreen.draw();
 
@@ -190,8 +194,19 @@ function draw() {
   // The lit page dot = the screen's number ('02' -> dot 2; '--' -> none)
   const dot = /^[0-9]+$/.test(currentScreen.number) ? int(currentScreen.number) : -1;
   if (!currentScreen.hideTopBar) TopBar(dot, PAGE_DOTS); // (the case file reveal hides it)
+  // Debug overlay (D): this round's hairstyle, bottom right
+  if (uiDebug && recipe && recipe.hair) {
+    push();
+    noStroke();
+    fill(CONFIG.ui.colors.debug);
+    setType('label');
+    textAlign(RIGHT, BASELINE);
+    text('hair: ' + recipe.hair + (CONFIG.doodle.hairStyle === 'random' ? ' (random)' : ''), CONFIG.stage.width - CONFIG.ui.tokens.layout.margin, CONFIG.stage.height - CONFIG.ui.tokens.layout.margin);
+    pop();
+  }
   Toast(message); // short messages (the classic booth keeps its own drawMessage)
-  if (sfxMuted) SoundOffLabel(); // U
+  if (sfxMuted) SoundOffLabel('SOUND OFF  (U)'); // U
+  else if (!CONFIG.music.on) SoundOffLabel('MUSIC OFF  (Shift+M)'); // Shift+M
   if (soundLogShown) SoundLog(sfxLog, CONFIG.ui.tokens.layout.margin, CONFIG.stage.height - CONFIG.ui.tokens.layout.margin); // Shift+L
   if (startOverlayShown()) StartOverlay(); // "CLICK TO START" (sound needs one click)
 
@@ -215,6 +230,7 @@ function goTo(name) {
   screenEnteredAt = millis();
   currentScreen = SCREENS[name];
   currentScreen.enter();
+  musicLevelForScreen(name); // music.js: this screen's music level (CONFIG.music.levels)
 }
 
 // The next / previous screen in the story. After the last screen we
@@ -745,6 +761,11 @@ function keyPressed() {
     testRecipes();
     return false;
   }
+  // Shift+M works everywhere: the music on / off (U mutes everything)
+  if (key === 'M') {
+    showMessage('Music: ' + (toggleMusic() ? 'on' : 'off'));
+    return false;
+  }
   // Shift+L works everywhere: the sound log (the last sounds played, for testing)
   if (key === 'L') {
     soundLogShown = !soundLogShown;
@@ -786,6 +807,13 @@ function keyPressed() {
     uiDebug = !uiDebug; // red reference shapes + measurements (ui/debug.js)
     uiDebugLogged = false; // print the measurements again
     showMessage('Debug overlay: ' + (uiDebug ? 'on' : 'off'));
+  }
+  else if (key === 't') {
+    // T: the next hairstyle (random, then every style, then none). With a
+    // photo, the composite is drawn again with it straight away.
+    CONFIG.doodle.hairStyle = nextInList(['random'].concat(hairStyleList(), ['none']), CONFIG.doodle.hairStyle);
+    if (snap) rebuildCollage(false, 'doodle');
+    showMessage('Hair: ' + CONFIG.doodle.hairStyle + (recipe && recipe.hair ? '  (' + recipe.hair + ')' : ''));
   }
   // Any other key: the screen can handle it, if it wants to
   // (e.g. SPACE or H on the Hands Up screen, in later milestones)
@@ -896,7 +924,7 @@ function keyPressedClassic() {
     d.cutStyle = nextInList(['scissor', 'smooth', 'rect'], d.cutStyle);
   } else if (k === 'c') CONFIG.pieces.cutStyle = CONFIG.pieces.cutStyle === 'rect' ? 'shape' : 'rect';
   else if (k === 'h') CONFIG.pieces.halftonePieces = !CONFIG.pieces.halftonePieces;
-  else if (k === 't') CONFIG.doodle.hairStyle = nextInList(['random'].concat(HAIR_STYLES), CONFIG.doodle.hairStyle);
+  else if (k === 't') CONFIG.doodle.hairStyle = nextInList(['random'].concat(hairStyleList(), ['none']), CONFIG.doodle.hairStyle);
   else if (k === 'n') CONFIG.doodle.noseMode = nextInList(['piece', 'line', 'both'], CONFIG.doodle.noseMode);
   else if (k === 'o') CONFIG.doodle.owners.mark = nextInList(['none', 'dot', 'tape'], CONFIG.doodle.owners.mark);
   // B: sticker border on / off. (Doodle mode only: in halftone mode, B is

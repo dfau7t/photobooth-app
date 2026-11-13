@@ -20,17 +20,21 @@
 //   Placard(x, y, number, date, colour)
 //   TornPoster(slot, size, colour, cx, cy, drawContent)
 //   makeStamp / showStamp / hideStamp / drawStamp
-//   FloorMark(slot, cx, cy)                 a floor mark "01" in the person's colour
+//   FloorMark(slot, cx, cy, lit)            a floor mark "01": doodle rectangle, white outline, person-colour number (lit = filled)
 //   NumberBadge(number, label, x, cy)       (3) PEOPLE PER ROUND
 //   TornBand(w, cx, cy, colour)             a wide torn paper strip
 //   ChalkFigure(variant, cx, cy, angle, ms) a chalk body outline that draws itself on
 //   FacePhoto(face, x, y, size)             the live camera, cropped around a face
-//   WantedPoster(slot, size, cx, cy, face, number)   a WANTED poster, empty or with a face
+//   WantedPoster(slot, size, cx, cy, face, number, flash)   a WANTED poster, empty or with a face (flash: the alarm blink)
 //   SirenFlash(ms)                          the whole stage flashes red / blue
 //   SlamWord(words, x, baseline, startedAt, style, from)   a word that slams in
 //   PoliceOfficer(x, feetY, talking, facing)  the cartoon officer with a megaphone
 //   SpeechBubble(text, chars, x, cy, tail)  a doodle bubble that fits its words; types 'chars' letters
 //   SoundLog(entries, x, bottom)            the sound log overlay (Shift+L, testing)
+//   DoodleArrow(x, y, dir, {progress, nudge}) a big hand-drawn arrow from its tail (x, y), 'left' / 'right'
+//   DoodlePrinter(cx, slotY, shake, between) the doodle printer (06 print wait); between() = the page
+//   EmergingPage(img, cx, slotY, w, k, jig) the printed page coming out of it, k = 0–1
+//   PrintProgress(cx, y, k)                 the doodle progress bar under it
 //   PoliceCar(x, groundY, state)            the police car (wheels, light bar, optional POLICE)
 //   SirenGlow(cx, cy, ms, strength)         a soft red / blue glow on the background
 //   GroundLine(y)                           a faint doodle line for the ground
@@ -384,22 +388,28 @@ function drawStamp(s) {
 
 // ---------- floor marks and badges ----------
 
-// One of the three marks on the floor: a doodle circle with "01" in the
-// person's colour. slot 0/1/2 = person 01/02/03.
-function FloorMark(slot, cx, cy) {
+// One of the three marks on the floor: a doodle rectangle, filled black,
+// with a chalk-white outline, and "01" / "02" / "03" in mono in the person's colour.
+// slot 0/1/2 = person 01/02/03. lit (optional, 0–1): filled in the person's
+// colour (someone is standing there), with the number in black.
+function FloorMark(slot, cx, cy, lit) {
   const t = CONFIG.ui.tokens.floorMark;
+  const c = CONFIG.ui.colors;
   const colour = CONFIG.colors.people[slot];
-  drawShape(circleShape('floormark', t.diameter, t), cx, cy, colour);
+  const k = constrain(lit || 0, 0, 1);
+  const inside = lerpColor(color(c.stage), color(colour), k);
+  drawShape(rectShape('floormark', t.w, t.h, t), cx, cy, c.chalk, { fill: inside }); // white outline: shows on the blue floor
   push();
   noStroke();
-  fill(colour);
+  fill(k > 0.5 ? c.ink : colour);
   setType(t.label);
   textCentered(nf(slot + 1, 2), cx, cy);
   pop();
-  if (uiDebug) debugCircle(cx, cy, t.diameter);
+  if (uiDebug) debugRect(cx, cy, t.w, t.h, 0);
 }
 
-// A number in a small doodle circle, followed by a label: (3) PEOPLE PER ROUND.
+
+// A number in a doodle circle (like the page dots), followed by a label: (3) PEOPLE PER ROUND.
 // x = the left edge of the circle.
 function NumberBadge(number, label, x, cy) {
   const t = CONFIG.ui.tokens.badge;
@@ -408,9 +418,9 @@ function NumberBadge(number, label, x, cy) {
   push();
   noStroke();
   fill(CONFIG.ui.colors.text);
-  setType(t.label);
+  setType(t.number); // the number: display font
   textCentered(number, cx, cy);
-  setType('label');
+  setType(t.label); // the words: mono
   textAlign(LEFT, BASELINE);
   const cap = drawingContext.measureText('H').actualBoundingBoxAscent;
   text(label, x + t.diameter + CONFIG.ui.tokens.space.m, cy + cap / 2);
@@ -514,13 +524,18 @@ function faceCropTarget(face) {
 //   the booking number
 // slot 0/1/2 = person 01/02/03. size: 'S' | 'M' | 'L'.
 // crop: where the face is (or null = empty). number: "48213907" (or null).
-function WantedPoster(slot, size, cx, cy, crop, number) {
+// flash (optional): true = the alarm blink ("ALL 3 FOUND"): the WANTED
+// headline and the photo frame flash to chalk white.
+// Everything inside scales with the poster size (tokens.wantedPoster).
+function WantedPoster(slot, size, cx, cy, crop, number, flash) {
   const t = CONFIG.ui.tokens;
   const c = CONFIG.ui.colors;
+  const wp = t.wantedPoster;
+  const lineColour = flash ? c.chalk : c.ink; // the headline + frame
   TornPoster(slot, size, CONFIG.colors.people[slot], cx, cy, function (w, h) {
-    const pad = t.space.xl;
+    const pad = t.space[wp.pad[size]];
     noStroke();
-    fill(c.ink);
+    fill(lineColour);
 
     // Headline, on the poster's top padding
     setType(t.wantedPoster.headline[size]);
@@ -533,23 +548,23 @@ function WantedPoster(slot, size, cx, cy, crop, number) {
     const f = w - 2 * pad;
     const fx = -f / 2;
     const fy = headlineBase + t.space.l;
-    const inset = t.wantedPoster.photoInset;
+    const inset = wp.photoInset;
     if (crop) {
       FacePhoto(crop, fx + inset, fy + inset, f - 2 * inset);
-      DoodleFrame(fx, fy, f, f, c.ink);
+      DoodleFrame(fx, fy, f, f, lineColour);
     } else {
       // Empty: the frame pulses slowly, waiting for a suspect
       const pulse = 0.5 + 0.5 * sin((millis() / t.timing.pulseMs) * TWO_PI);
-      DoodleFrame(fx, fy, f, f, c.ink, 0.3 + 0.7 * pulse);
+      DoodleFrame(fx, fy, f, f, lineColour, 0.3 + 0.7 * pulse);
       fill(c.ink);
-      setType('label');
+      setType(wp.text[size]);
       textCentered('SUSPECT ' + nf(slot + 1, 2), 0, fy + f / 2);
     }
 
     // The booking number, under the frame
     fill(c.ink);
-    setType('label');
-    textCentered(number ? 'No. ' + number : 'No. --------', 0, fy + f + t.space.xl);
+    setType(wp.text[size]);
+    textCentered(number ? 'No. ' + number : 'No. --------', 0, fy + f + pad);
   });
 }
 
@@ -1370,24 +1385,28 @@ function StartOverlay() {
 }
 
 // "SOUND OFF", top right under the top bar, while muted (key U)
-function SoundOffLabel() {
+// words: e.g. 'SOUND OFF  (U)' or 'MUSIC OFF  (Shift+M)'
+function SoundOffLabel(words) {
   const t = CONFIG.ui.tokens;
   push();
   noStroke();
   fill(CONFIG.ui.colors.sirenRed);
   setType('label');
   textAlign(RIGHT, BASELINE);
-  text('SOUND OFF  (U)', CONFIG.stage.width - t.layout.margin, t.soundOff.y);
+  text(words || 'SOUND OFF  (U)', CONFIG.stage.width - t.layout.margin, t.soundOff.y);
   pop();
 }
 
 // The sound log (Shift+L, for testing): the last sounds played, one per
 // line: screen, seconds since that screen started, name, file / synth.
 // (x, bottom) = its bottom-left corner. entries: sfxLog (sound.js), newest last.
-function SoundLog(entries, x, bottom) {
+// lines (optional): how many lines to show (default tokens.soundLog.lines).
+function SoundLog(entries, x, bottom, lines) {
   const t = CONFIG.ui.tokens.soundLog;
   const c = CONFIG.ui.colors;
-  const h = soundLogHeight();
+  const n = lines ?? t.lines;
+  const h = soundLogHeight(n);
+  entries = entries.slice(-n); // the newest n
   const y = bottom - h;
   push();
   noStroke();
@@ -1407,9 +1426,9 @@ function SoundLog(entries, x, bottom) {
 }
 
 // The sound log's height: a title line + tokens.soundLog.lines lines
-function soundLogHeight() {
+function soundLogHeight(lines) {
   const t = CONFIG.ui.tokens.soundLog;
-  return 2 * t.padY + (t.lines + 1) * t.lineH;
+  return 2 * t.padY + ((lines ?? t.lines) + 1) * t.lineH;
 }
 
 // One button of the sound test: the sound's name, and below it what's
@@ -1483,6 +1502,123 @@ function CaseFilePoster(picture, cx, cy, angle) {
   DoodleFrame(px, py, pw, ph, c.ink);
   pop();
   if (uiDebug) debugRect(cx, cy, w, h, angle);
+}
+
+// ---------- doodle arrow ----------
+
+// A big hand-drawn arrow: a slightly curved shaft, and an arrowhead of two
+// quick strokes (not a filled triangle). (x, y) = its TAIL. It points
+// 'right' or 'left', and a little down (tokens.arrow.drop).
+// options (all optional):
+//   length   px (default tokens.arrow.large)
+//   progress 0–1: drawing on (the shaft first, then the two head strokes)
+//   nudge    px: moved forwards along its direction (the "look here" nudge)
+//   colour   (default chalk)
+// The shapes are cached (same name + size = the same wobble); the left
+// arrow is the right one, mirrored.
+function DoodleArrow(x, y, dir, options) {
+  const t = CONFIG.ui.tokens.arrow;
+  const o = options || {};
+  const L = o.length ?? t.large;
+  const style = { stroke: t.stroke, wobble: t.wobble };
+  const a = atan(t.drop); // its direction, a little below horizontal
+  const tip = { x: L * cos(a), y: L * sin(a) };
+  // The shaft: tail -> tip, bowed a little upwards (a smooth hand-drawn curve)
+  const shaft = [];
+  for (let i = 0; i <= 8; i++) {
+    const k = i / 8;
+    const bow = -t.bend * L * sin(k * PI); // 0 at both ends, most in the middle
+    shaft.push({ x: tip.x * k + bow * sin(a), y: tip.y * k - bow * cos(a) });
+  }
+  // The head: two strokes from the tip back, either side of the shaft
+  const headLine = (side) => {
+    const back = a + PI + side * radians(t.headAngle);
+    return [tip, { x: tip.x + cos(back) * t.head * L, y: tip.y + sin(back) * t.head * L }];
+  };
+  const p = o.progress ?? 1;
+  const nudge = o.nudge || 0;
+  push();
+  translate(x + (dir === 'left' ? -1 : 1) * nudge * cos(a), y + nudge * sin(a));
+  if (dir === 'left') scale(-1, 1); // the left arrow = the right one, mirrored
+  const c = o.colour ?? CONFIG.ui.colors.chalk;
+  drawShape(lineShape('arrow-shaft-' + L, shaft, style), 0, 0, c, { progress: p / 0.7 });
+  drawShape(lineShape('arrow-head-a-' + L, headLine(1), style), 0, 0, c, { progress: (p - 0.7) / 0.15 });
+  drawShape(lineShape('arrow-head-b-' + L, headLine(-1), style), 0, 0, c, { progress: (p - 0.85) / 0.15 });
+  pop();
+  if (uiDebug) debugRect(x + ((dir === 'left' ? -1 : 1) * tip.x) / 2, y + tip.y / 2, L * cos(a), L * sin(a), 0);
+}
+
+// The arrow's nudge at time ms (px): forwards and back once, every nudgeEveryMs
+function arrowNudge(ms) {
+  const t = CONFIG.ui.tokens.arrow;
+  const n = ms % t.nudgeEveryMs;
+  return n < t.nudgeMs ? t.nudgePx * sin((n / t.nudgeMs) * PI) : 0;
+}
+
+// ---------- the doodle printer (06, while the case file prints) ----------
+
+// A doodle printer, front view, in chalk lines (like the police car: the
+// body is filled black, so a page behind it is hidden below the slot).
+// (cx, slotY) = the middle of the paper slot on its top: the page comes
+// out of there. Size: tokens.printWait.printer. shake: px left / right.
+// between (optional): a function that draws what goes BETWEEN the paper
+// tray at the back and the body (the page coming out: in front of the
+// tray, behind the body).
+function DoodlePrinter(cx, slotY, shake, between) {
+  const t = CONFIG.ui.tokens.printWait.printer;
+  const c = CONFIG.ui.colors;
+  const style = { stroke: t.stroke, wobble: t.wobble, ends: t.ends };
+  const x = cx + (shake || 0);
+  const w = t.w;
+  const h = t.h;
+  // The paper tray at the back, sticking up behind the body
+  drawShape(lineShape('printer-tray', [{ x: -w * 0.32, y: 0 }, { x: -w * 0.28, y: -h * 0.42 }, { x: w * 0.28, y: -h * 0.42 }, { x: w * 0.32, y: 0 }], style), x, slotY, c.chalk, { fill: c.stage });
+  if (between) between();
+  // The body, filled black
+  drawShape(rectShape('printer-body', w, h, style), x, slotY + h / 2, c.chalk, { fill: c.stage });
+  // The paper slot on top, and the output lip below it
+  drawShape(lineShape('printer-slot', [{ x: -w * 0.34, y: 0 }, { x: w * 0.34, y: 0 }], style), x, slotY + h * 0.14, c.chalk);
+  // The control panel: a little screen and a button, front right
+  drawShape(rectShape('printer-screen', w * 0.18, h * 0.16, style), x + w * 0.3, slotY + h * 0.42, c.chalk);
+  drawShape(circleShape('printer-button', h * 0.14, style), x + w * 0.3, slotY + h * 0.7, c.chalk);
+  // The paper-out tray at the front
+  drawShape(lineShape('printer-out', [{ x: -w * 0.36, y: 0 }, { x: -w * 0.3, y: h * 0.12 }, { x: w * 0.3, y: h * 0.12 }, { x: w * 0.36, y: 0 }], style), x, slotY + h * 0.62, c.chalk);
+  if (uiDebug) debugRect(x, slotY + h / 2, w, h, 0);
+}
+
+// The page coming out of the printer: the TOP part of 'img' (a printed
+// page), 'k' (0–1) of it, sticking up out of the slot at (cx, slotY).
+// So it works like a progress bar: k = 1 = the whole page is out.
+// w: its width on screen (the height follows the page's shape). jiggle: px up / down.
+function EmergingPage(img, cx, slotY, w, k, jiggle) {
+  const h = (w * img.height) / img.width;
+  const shown = constrain(k, 0, 1) * h;
+  if (shown < 1) return;
+  const y = slotY - shown + (jiggle || 0);
+  image(img, cx - w / 2, y, w, shown, 0, 0, img.width, (shown / h) * img.height);
+  // A hairline doodle edge: the WHOLE page's outline (one cached shape),
+  // cut off at the slot, so only the part that's out shows
+  push();
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(cx - w / 2 - 8, y - 8, w + 16, shown + 8);
+  drawingContext.clip();
+  drawShape(rectShape('emerging-page', round(w), round(h), { stroke: 'hairline', wobble: 'subtle' }), cx, y + h / 2, CONFIG.ui.colors.muted);
+  drawingContext.restore();
+  pop();
+}
+
+// A doodle progress bar: a hand-drawn frame, filled 'k' (0–1) in chalk.
+// (cx, y) = the middle of its top edge. Size: tokens.printWait.progress.
+function PrintProgress(cx, y, k) {
+  const t = CONFIG.ui.tokens.printWait.progress;
+  const c = CONFIG.ui.colors;
+  push();
+  noStroke();
+  fill(c.chalk);
+  rect(cx - t.w / 2, y, t.w * constrain(k, 0, 1), t.h);
+  pop();
+  drawShape(rectShape('print-progress', t.w, t.h, t), cx, y + t.h / 2, c.chalk);
 }
 
 // A forensic evidence marker: a little doodle tent with a number on it.

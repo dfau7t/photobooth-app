@@ -31,6 +31,9 @@
 //   picture and the sound always change together, and never twice: a
 //   number only sounds if it's LOWER than the last one that sounded.
 //
+// MUSIC (CONFIG.music.mugshot): down to 0.1 when the countdown starts, silent
+// for the last half second before the snap, back to 0.5 after the flash.
+//
 // Keys: SPACE = take the photo now, H = demo on / off.
 //
 // (enter / update / draw / exit: see screens/welcome.js)
@@ -47,6 +50,7 @@ const mugshotScreen = {
   placards: [null, null, null], // where each placard is (follows its face smoothly)
   number: 0, // the countdown number showing now (3, 2, 1), 0 = none
   lastSounded: 4, // the last countdown number that made its sound (4 = none yet)
+  musicStep: 0, // the music: 0 = normal, 1 = down (countdown), 2 = silent (before the snap), 3 = back (after the flash)
 
   enter() {
     const t = CONFIG.ui.tokens.mugshot;
@@ -56,6 +60,7 @@ const mugshotScreen = {
     this.placards = [null, null, null];
     this.number = 0;
     this.lastSounded = 4;
+    this.musicStep = 0;
     // The radio from 02b must be silent, so the beeps are clear (it's
     // normally long gone: 02b stops it at FREEZE! and when it's left)
     stopSfx('radio', 150);
@@ -71,8 +76,14 @@ const mugshotScreen = {
     const t = CONFIG.ui.tokens.mugshot;
     const now = millis();
 
+    const mm = CONFIG.music.mugshot;
     // After the photo: wait for the flash, then the evidence
     if (this.capturedAt > 0) {
+      // The flash is over: the music comes back
+      if (this.musicStep < 3 && now - this.capturedAt >= t.flashMs) {
+        this.musicStep = 3;
+        setMusicLevel(mm.afterFlash); // music.js
+      }
       if (now - this.capturedAt >= t.flashMs + t.afterMs) goTo('evidence');
       return;
     }
@@ -99,6 +110,16 @@ const mugshotScreen = {
     if (this.number >= 1 && this.number < this.lastSounded) {
       this.lastSounded = this.number;
       playCountdownStep(this.number); // sound.js: beep / voice / both
+    }
+    // The music: down when the countdown starts, so the beeps stand out...
+    if (this.musicStep < 1 && this.number >= 1) {
+      this.musicStep = 1;
+      setMusicLevel(mm.countdown);
+    }
+    // ...and silent for a moment right before the snap
+    if (this.musicStep < 2 && now >= this.countdownEndsAt - mm.silenceMs) {
+      this.musicStep = 2;
+      setMusicLevel(0, mm.silenceFadeMs);
     }
 
     // The countdown has finished: try to take the photo

@@ -72,7 +72,10 @@ const styleguideScreen = {
     else if (this.page === 6) this.drawForgeryPage();
     else if (this.page === 7) this.drawCaseFilePage();
     else if (this.page === 8) this.drawCaseFileScreenPage();
-    else this.drawSoundTestPage();
+    else if (this.page === 9) this.drawSoundTestPage();
+    else if (this.page === 10) this.drawPrintWaitPage();
+    else if (this.page === 11) this.drawHairPage(0);
+    else this.drawHairPage(1);
   },
 
   // ---------- page 1: tokens + basic components ----------
@@ -209,7 +212,7 @@ const styleguideScreen = {
     });
     caption('TornPoster S + DoodleFrame', gridX(10) + 16, 1008, c.muted);
 
-    caption('STYLE GUIDE 1/10  ·  G next page  ·  D debug overlay (red = exact token size)  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 1/13  ·  G next page  ·  D debug overlay (red = exact token size)  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 2: screen components ----------
@@ -223,13 +226,25 @@ const styleguideScreen = {
     const posterY = 448;
     WantedPoster(0, 'M', gridX(0) + 200, posterY, null, null);
     const demoCrop = cameraReady ? { cx: video.width / 2, cy: video.height / 2, side: video.height / 2 } : null;
-    WantedPoster(1, 'M', gridX(0) + 648, posterY, demoCrop, '48213907');
+    // The second one plays "ALL 3 FOUND" in a loop (every 3 s): the alarm
+    // blink, then the FOUND stamp (on screen 01 the posters are size XL)
+    const F = CONFIG.ui.timing.found;
+    const loopMs = (millis() - this.enteredAt) % 3000;
+    const blinkMs = F.onMs + F.offMs;
+    const flash = loopMs < F.blinks * blinkMs && loopMs % blinkMs < F.onMs;
+    WantedPoster(1, 'M', gridX(0) + 648, posterY, demoCrop, '48213907', flash);
+    if (!this.foundStamp) this.foundStamp = makeStamp('FOUND', { x: gridX(0) + 648, y: posterY + 24, size: 'M', color: c.ink });
+    if (loopMs < F.blinks * blinkMs) this.foundStamp.shownAt = -1;
+    else showStamp(this.foundStamp);
+    drawStamp(this.foundStamp);
     caption('WantedPoster M  empty (frame pulses)', gridX(0), 776, c.muted);
-    caption('WantedPoster M  with a face', gridX(0) + 448, 776, c.muted);
+    caption('WantedPoster M  ALL 3 FOUND', gridX(0) + 448, 776, c.muted);
+    caption('(blink + FOUND stamp; on 01: size XL)', gridX(0) + 448, 800, c.muted);
 
     // Floor marks 01 – 03, and the badge
-    for (let i = 0; i < 3; i++) FloorMark(i, gridX(7) + 48 + i * 144, 216);
-    caption('FloorMark  01 / 02 / 03', gridX(7), 296, c.muted);
+    const fm = t.floorMark;
+    for (let i = 0; i < 3; i++) FloorMark(i, gridX(7) + fm.w / 2 + i * (fm.w + t.space.l), 216, i === 1 ? 1 : 0);
+    caption('FloorMark  01 / 02 (lit) / 03', gridX(7), 296, c.muted);
     NumberBadge('3', 'PEOPLE PER ROUND', gridX(7), 360);
     caption('NumberBadge', gridX(7), 416, c.muted);
 
@@ -244,7 +259,7 @@ const styleguideScreen = {
     }
     caption('TornBand  +  ChalkFigure 0 / 1 / 2 (draws on, holds, fades, loops)', gridX(6) + 16, 848, c.muted);
 
-    caption('STYLE GUIDE 2/10  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 2/13  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 3: Hands Up components ----------
@@ -276,7 +291,7 @@ const styleguideScreen = {
     SpeechBubble(CONFIG.police.lines.t12 + ' ' + CONFIG.police.lines.t8, 999, h.bubbleRight, h.bubbleY);
     caption('PoliceOfficer  +  SpeechBubble (fits its words)', gridX(8), 1048, c.muted);
 
-    caption('STYLE GUIDE 3/10  HANDS UP  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 3/13  HANDS UP  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 4: Mugshot components ----------
@@ -295,7 +310,7 @@ const styleguideScreen = {
     }
     Countdown(3, view.x + view.w / 2, view.y + view.h / 2);
     caption('CameraView + DoodleFrame  ·  HeightChart  ·  Placard x3  ·  Countdown  ·  CameraFlash: white, fades in ' + t.mugshot.flashMs + ' ms', view.x, 952, c.muted);
-    caption('STYLE GUIDE 4/10  MUGSHOT  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 4/13  MUGSHOT  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 5: Arrival components ----------
@@ -313,7 +328,7 @@ const styleguideScreen = {
     SpeechBubble(CONFIG.police.lines.start, 999, a.bubbleLeft, a.bubbleY, 'left');
     caption('PoliceCar (+ speed lines, light bar swaps red / blue)  ·  SirenGlow  ·  GroundLine', gridX(0), 856, c.muted);
     caption('PoliceOfficer facing right  ·  SpeechBubble tail left', gridX(6), 856, c.muted);
-    caption('STYLE GUIDE 5/10  ARRIVAL  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 5/13  ARRIVAL  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 6: Hands Up live (scene 02b) ----------
@@ -344,7 +359,7 @@ const styleguideScreen = {
     SlamWord('UP!', t.layout.margin, h.headlineBaselines[1], 0, 'headline', 1);
     PoliceOfficer(h.officerX, h.officerFeetY, true, 'left', h.officerScale);
     SpeechBubble(CONFIG.police.lines.t8, 999, h.bubbleRight, h.bubbleY, 'side');
-    caption('STYLE GUIDE 6/10  HANDS UP LIVE  ·  G next page  ·  D debug overlay', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 6/13  HANDS UP LIVE  ·  G next page  ·  D debug overlay', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 7: Forgery (the bandits) ----------
@@ -373,7 +388,7 @@ const styleguideScreen = {
     caption('Scissors closed', gridX(10), 592, c.muted);
     Scissors(gridX(10) + 48, 728, 0, 1);
     caption('Scissors open', gridX(10), 816, c.muted);
-    caption('STYLE GUIDE 7/10  FORGERY  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 7/13  FORGERY  ·  G next page  ·  D debug overlay  ·  ←  →  back to the story', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 8: Case file (print status + the printed page) ----------
@@ -421,7 +436,74 @@ const styleguideScreen = {
     rect(x, y, w, h);
     noStroke();
     caption('Print: US Letter, 300 dpi  ·  O = reference ' + (this.showReference ? 'on' : 'off'), x, 1048, c.muted);
-    caption('STYLE GUIDE 8/10  CASE FILE PRINT  ·  G next page  ·  D debug overlay', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 8/13  CASE FILE PRINT  ·  G next page  ·  D debug overlay', gridX(0), 1048, c.muted);
+  },
+
+  // ---------- pages 12 + 13: hairstyles ----------
+  // One row per style: 3 different seeds on the same head, then the same
+  // 3 on a wider head, so you can see they vary and are never symmetrical.
+  // Drawn once into a picture (cached), in chalk on black.
+  // Shift+R: the reference sketch on top at 30%, to compare.
+  drawHairPage(group) {
+    const c = CONFIG.ui.colors;
+    const S = CONFIG.ui.tokens.hairSheet;
+    const styles = group === 0 ? HAIR_STYLES.slice(0, 5) : HAIR_STYLES.slice(5).concat(CONFIG.doodle.hairExtras ? HAIR_EXTRAS : []);
+    if (!this.hairSheets) this.hairSheets = [];
+    if (!this.hairSheets[group]) this.hairSheets[group] = makeHairSheet(styles); // hair.js
+    image(this.hairSheets[group], 0, 0);
+    styles.forEach((style, r) => {
+      const cell = hairSheetCell(r, 0);
+      const built = !!HAIR_MAKERS[style];
+      const redrawn = hairOpensHead(style);
+      caption(style + (built ? (redrawn ? '' : '  (old drawing)') : '  (next step)'), cell.x, cell.y + CONFIG.ui.tokens.space.l, built && redrawn ? c.text : c.debug);
+    });
+    caption('normal head  ·  3 seeds', hairSheetCell(0, 0).x, S.top - CONFIG.ui.tokens.space.s, c.muted);
+    caption('wider head  ·  the same 3 seeds', hairSheetCell(0, 3).x, S.top - CONFIG.ui.tokens.space.s, c.muted);
+    // Shift+R: the reference sketch, at 30%, fitted to the stage height
+    if (this.showHairRef) {
+      if (!this.hairRef) this.hairRef = loadImage('assets/reference/hair_ref.png');
+      if (this.hairRef.width > 1) {
+        const h = CONFIG.stage.height;
+        const w = (h * this.hairRef.width) / this.hairRef.height;
+        tint(255, 255 * S.refAlpha);
+        image(this.hairRef, (CONFIG.stage.width - w) / 2, 0, w, h);
+        noTint();
+      }
+    }
+    const n = group === 0 ? 12 : 13;
+    caption('STYLE GUIDE ' + n + '/13  HAIR ' + (group + 1) + '/2  ·  dots = eyes  ·  Shift+R reference ' + (this.showHairRef ? 'on' : 'off') + '  ·  G ' + (group === 0 ? 'next' : 'first') + ' page', gridX(0), 1048, c.muted);
+  },
+
+  // ---------- page 11: the print wait (06, while the case file prints) ----------
+  // Laid out with the print wait's own tokens. The page comes out of the
+  // printer in a loop (every 8 s), like the progress of a real print.
+  drawPrintWaitPage() {
+    const c = CONFIG.ui.colors;
+    const pw = CONFIG.ui.tokens.printWait;
+    const loop = 8000;
+    const ms = (millis() - this.enteredAt) % loop;
+    const k = ms / loop;
+    // A small printed page (this round's, or a stand-in), once the fonts are in
+    if (!this.waitPage && fontLoaded('hero') && fontLoaded('label')) {
+      const stand = collage && collage.parts ? null : makeStandInParts();
+      this.waitPage = makePrintImage(stand || collage.parts, recipe ? recipe.number : 2, pw.page.dpi);
+      if (stand) for (const st of stand.stickers) st.img.remove();
+    }
+    const secs = ms / 1000;
+    DoodlePrinter(pw.printer.cx, pw.printer.slotY, pw.shake.px * sin(secs * pw.shake.hz * TWO_PI), () => {
+      if (this.waitPage) EmergingPage(this.waitPage, pw.printer.cx, pw.printer.slotY, pw.page.w, k, pw.feed.px * sin(secs * pw.feed.hz * TWO_PI));
+    });
+    PrintProgress(pw.printer.cx, pw.progress.y, k);
+    // DoodleArrow, both ways (as on the final case file): draws on, then nudges; every 4 s
+    const A = CONFIG.ui.tokens.arrow;
+    const am = (millis() - this.enteredAt) % 4000;
+    const arrowOpts = { progress: am / A.drawMs, nudge: am > A.drawMs ? arrowNudge(am - A.drawMs) : 0 };
+    DoodleArrow(gridX(9), 440, 'right', arrowOpts);
+    DoodleArrow(gridX(3) + CONFIG.ui.tokens.layout.column, 440, 'left', arrowOpts);
+    caption('DoodleArrow right', gridX(9), 400, c.muted);
+    caption('DoodleArrow left', gridX(0), 400, c.muted);
+    caption('DoodlePrinter + EmergingPage (the real print, top first)  ·  PrintProgress  ·  ~' + ceil((loop - ms) / 1000) + ' s left', gridX(0), pw.leftBaseline, c.muted);
+    caption('STYLE GUIDE 11/13  PRINT WAIT  ·  G next page', gridX(0), 1048, c.muted);
   },
 
   // ---------- page 9: Case file screen components ----------
@@ -443,7 +525,7 @@ const styleguideScreen = {
     }
     drawStamp(this.page9Stamp);
     caption('CaseFilePoster (torn paper, size L, blank before the reveal)  ·  Stamp M', gridX(0), 1068, c.muted);
-    caption('STYLE GUIDE 9/10  CASE FILE  ·  G next page', x, 1048, c.muted);
+    caption('STYLE GUIDE 9/13  CASE FILE  ·  G next page', x, 1048, c.muted);
   },
 
   // ---------- page 10: Sound test ----------
@@ -454,14 +536,23 @@ const styleguideScreen = {
     const t = CONFIG.ui.tokens.soundButton;
     const buttons = [];
     const names = Object.keys(CONFIG.sound.sounds);
+    // As many buttons per row as fit between the margins
+    const perRow = floor((CONFIG.stage.width - 2 * CONFIG.ui.tokens.layout.margin + t.gap) / (t.w + t.gap));
     names.forEach(function (name, i) {
-      buttons.push({ name: name, x: gridX(0) + (i % 5) * (t.w + t.gap), y: 216 + floor(i / 5) * (t.h + t.gap) });
+      buttons.push({ name: name, x: gridX(0) + (i % perRow) * (t.w + t.gap), y: 216 + floor(i / perRow) * (t.h + t.gap) });
     });
-    const y = 216 + ceil(names.length / 5) * (t.h + t.gap) + t.gap * 2;
-    // The actions, 5 per row: the countdown (03) in its three modes on the second row
-    const actions = ['volume-', 'volume+', 'mute', 'stop all', 'evidence + grid', 'countdown: beep', 'countdown: voice', 'countdown: both'];
-    actions.forEach(function (action, i) {
-      buttons.push({ action: action, x: gridX(0) + (i % 5) * (t.w + t.gap), y: y + floor(i / 5) * (t.h + t.gap) });
+    const y = 216 + ceil(names.length / perRow) * (t.h + t.gap) + t.gap * 2;
+    // The actions, 5 per row: the countdown (03) in its three modes on the
+    // second row (the sound log next to it), the music on the third
+    const rows = [
+      ['volume-', 'volume+', 'mute', 'stop all', 'evidence + grid'],
+      ['countdown: beep', 'countdown: voice', 'countdown: both'],
+      ['music', 'music vol-', 'music vol+', 'loop point', 'level'],
+    ];
+    rows.forEach(function (row, r) {
+      row.forEach(function (action, i) {
+        buttons.push({ action: action, x: gridX(0) + i * (t.w + t.gap), y: y + r * (t.h + t.gap) });
+      });
     });
     return buttons;
   },
@@ -484,17 +575,25 @@ const styleguideScreen = {
           'countdown: beep': '3 · 2 · 1 (higher) · shutter',
           'countdown: voice': 'the officer: "Three… two… one…"',
           'countdown: both': 'beeps + voice',
+          music: !music.buffer ? 'no file (assets/music/)' : (CONFIG.music.on ? 'on' : 'off') + '  ·  ' + nf(musicPosition(), 0, 1) + ' s',
+          'music vol-': 'base ' + round(CONFIG.music.volume * 100) + '%',
+          'music vol+': 'base ' + round(CONFIG.music.volume * 100) + '%',
+          'loop point': nf(CONFIG.music.loopEnd, 0, 1) + ' s, ' + CONFIG.music.crossfadeMs + ' ms crossfade',
+          level: this.levelPreview ? this.levelPreview + ': ' + CONFIG.music.levels[this.levelPreview] : 'each screen\'s level',
         };
-        SoundButton(b.action.toUpperCase(), subs[b.action], b.x, b.y, b.action === 'mute' && sfxMuted);
+        if (b.action === 'music') b.label = CONFIG.music.on ? 'MUSIC: STOP' : 'MUSIC: PLAY';
+        const lit = (b.action === 'mute' && sfxMuted) || (b.action === 'music' && CONFIG.music.on && music.started);
+        SoundButton(b.label || b.action.toUpperCase(), subs[b.action], b.x, b.y, lit);
       }
     }
     // The sound log (Shift+L on any screen), with what has played so far:
     // next to the second row of actions (which has 3 buttons)
+    // (2 lines here, to fit; Shift+L shows the full log anywhere)
     const st = CONFIG.ui.tokens.soundButton;
-    const last = this.soundTestButtons().pop(); // 'countdown: both', the third button of that row
-    SoundLog(sfxLog, last.x + st.w + st.gap, last.y + soundLogHeight());
+    const last = this.soundTestButtons().find((b) => b.action === 'countdown: both'); // the third button of that row
+    SoundLog(sfxLog, last.x + st.w + st.gap, last.y + st.h, 2);
     caption(soundUnlocked() ? 'Sound engine: on' : 'Sound engine: waiting for a click (the browser blocks sound until then)', gridX(0), 1000, c.muted);
-    caption('STYLE GUIDE 10/10  SOUND TEST  ·  G first page  ·  U mute', gridX(0), 1048, c.muted);
+    caption('STYLE GUIDE 10/13  SOUND TEST  ·  G next page  ·  U mute', gridX(0), 1048, c.muted);
   },
 
   // Clicks (only the sound test page has buttons)
@@ -511,6 +610,16 @@ const styleguideScreen = {
       else if (b.action === 'mute') toggleMute();
       else if (b.action === 'stop all') stopAllSfx(100);
       else if (b.action.startsWith('countdown: ')) this.playCountdownTest(b.action.split(': ')[1]);
+      else if (b.action === 'music') toggleMusic();
+      else if (b.action === 'music vol-') setMusicVolume(CONFIG.music.volume - 0.05);
+      else if (b.action === 'music vol+') setMusicVolume(CONFIG.music.volume + 0.05);
+      else if (b.action === 'loop point') jumpToMusicLoop();
+      else if (b.action === 'level') {
+        // Each click: the next screen's music level (fades like on that screen)
+        const names = Object.keys(CONFIG.music.levels);
+        this.levelPreview = names[(names.indexOf(this.levelPreview) + 1) % names.length];
+        setMusicLevel(CONFIG.music.levels[this.levelPreview]);
+      }
       else if (b.action === 'evidence + grid') {
         evidenceScreen.returnTo = 'styleguide'; // come back here afterwards
         goTo('evidence');
@@ -529,10 +638,16 @@ const styleguideScreen = {
   // O: the print reference on / off (page 8)
   keyPressed() {
     if (key === 'o' || key === 'O') this.showReference = !this.showReference;
+    if (key === 'R') this.showHairRef = !this.showHairRef; // Shift+R: the hair reference (pages 12 + 13)
   },
 
   exit() {
     this.page9Stamp = null;
+    this.levelPreview = null;
+    for (const sheet of this.hairSheets || []) if (sheet) sheet.remove(); // pages 12 + 13's drawings
+    this.hairSheets = null;
+    if (this.waitPage) this.waitPage.remove(); // page 11's small printed page
+    this.waitPage = null; // (the next screen sets its own music level)
     if (this.printPreview) this.printPreview.remove(); // the big print picture
     this.printPreview = null;
   },
@@ -540,7 +655,7 @@ const styleguideScreen = {
 
 // ---------- small helpers for this page ----------
 
-const STYLEGUIDE_PAGES = 10;
+const STYLEGUIDE_PAGES = 13;
 
 function sectionTitle(words, x, y) {
   push();
